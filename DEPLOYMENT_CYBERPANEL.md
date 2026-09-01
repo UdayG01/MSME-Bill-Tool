@@ -290,6 +290,95 @@ systemctl status msme-bill-backend --no-pager
 
 Rebuild and copy the frontend whenever `frontend/` changes. Restart OpenLiteSpeed only when its configuration changes.
 
+## 9. Automate future deployments with GitHub Actions
+
+Edit the application locally, commit the change, and push to the `main` branch. GitHub Actions can test and build the application, then deploy the approved `main` commit to this VPS without manually uploading ZIP files.
+
+```text
+Local editor -> push to main -> GitHub Actions -> VPS deploy script -> health check
+```
+
+Use GitHub-hosted runners. Do not install a self-hosted GitHub runner on this production VPS: hosted runners are isolated from the VPS database and server secrets.
+
+### Repository preparation
+
+1. Push the current `main` branch to GitHub. A public repository is acceptable only if all code may be publicly visible.
+2. Keep `.env`, database files, backups, media uploads, virtual environments, `node_modules`, and build output out of Git. The existing `.gitignore` already covers those items.
+3. The `msme_updates/` directory is unrelated reference material. Do not deploy it. The deployment workflow must sync only `backend/`, `frontend/`, `deployment/`, and the required root-level configuration files.
+4. Protect `main`: deploy only commits merged into `main`, never a pull request branch or a fork.
+
+### VPS deployment account
+
+Create a separate `msmedeploy` account for GitHub Actions. Do not use `root`, and do not use the `msmebill` account that runs FastAPI.
+
+```bash
+apt install -y rsync
+useradd --create-home --shell /bin/bash msmedeploy
+install -d -m 700 -o msmedeploy -g msmedeploy /home/msmedeploy/.ssh
+```
+
+Add the public half of a new deployment SSH key to `/home/msmedeploy/.ssh/authorized_keys` with mode `600`. The private half is stored only in GitHub Actions secrets.
+
+Give `msmedeploy` write access to the deployable application-source directories and `/home/grovisor.co.in/public_html/billing`, but do not give it access to `.env` or the private `media/` directory. Keep `.env` mode `600` and `media/` mode `700`, owned by `msmebill`.
+
+Create a root-owned deployment wrapper, for example `/usr/local/sbin/deploy-msme-bill`, and allow `msmedeploy` to invoke only that wrapper through `sudo`. The wrapper must:
+
+1. Run the existing database/media backup before any migration.
+2. Install Python requirements into the existing backend virtual environment using `pip install --no-cache-dir -r requirements.txt` as `msmebill`.
+3. Run `python scripts/upgrade_database.py` as `msmebill`.
+4. Restart `msme-bill-backend`.
+5. Fail the deployment unless `curl http://127.0.0.1:8001/health` succeeds.
+
+This is intentionally narrower than general root SSH access.
+
+### GitHub repository secrets
+
+Create these repository-level GitHub Actions secrets:
+
+```text
+VPS_HOST              VPS public IP or deployment hostname
+VPS_DEPLOY_USER       msmedeploy
+VPS_SSH_PRIVATE_KEY   private half of the deployment SSH key
+VPS_KNOWN_HOSTS       pinned SSH host key for the VPS
+```
+
+Never add `DATABASE_URL`, MariaDB passwords, `.env`, or media files as GitHub secrets. They remain on the VPS.
+
+### Workflows to add
+
+Create two workflow files under `.github/workflows/`:
+
+1. `ci.yml` runs on pull requests and pushes. It installs Python dependencies, runs `pytest`, starts a MariaDB service for a migration smoke test, installs Node 20, and runs `npm ci` plus `npm run build` in `frontend/`.
+2. `deploy-production.yml` runs only after successful CI for a push to `main`. It builds the frontend with `VITE_API_BASE_URL=https://api-billing.grovisor.co.in`, connects as `msmedeploy`, synchronizes only approved source paths, publishes the built frontend to `/home/grovisor.co.in/public_html/billing`, invokes the restricted VPS deployment wrapper, and verifies both health URLs.
+
+The remote sync must preserve these VPS-only paths:
+
+```text
+.env
+backend/.venv/
+media/
+logs/
+backups/
+```
+
+It must exclude these repository paths:
+
+```text
+msme_updates/
+*.zip
+frontend/node_modules/
+frontend/dist/
+backend/db/*.db
+```
+
+Build the frontend in GitHub Actions and upload only `frontend/dist/`; this avoids leaving another `node_modules` installation or build cache on the VPS.
+
+### First automated deployment
+
+Before the first workflow run, add the media settings from this guide to the VPS `.env`, create the private `media/` directory, and ensure the current backup script includes it. The first deploy must install Pillow, apply Alembic migration `0003_configurable_billing`, publish the rebuilt frontend, restart the API, and complete the health checks.
+
+After that, the normal release process is simply: local test, commit, push to `main`, then review the GitHub Actions deployment log.
+
 ## Troubleshooting
 
 - `502 Bad Gateway`: `systemctl status msme-bill-backend --no-pager`, then `journalctl -u msme-bill-backend -n 100 --no-pager`.
