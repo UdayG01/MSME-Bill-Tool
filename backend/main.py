@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import get_settings
-from routers import auth, company, credit_notes, customers, invoices, receipts, reports
+from routers import auth, billing_settings, company, credit_notes, customers, invoices, lut_certificates, receipts, reports, tax
 from services.errors import ServiceError
 
 settings = get_settings()
@@ -23,12 +23,15 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(billing_settings.router)
 app.include_router(company.router)
 app.include_router(credit_notes.router)
 app.include_router(customers.router)
 app.include_router(invoices.router)
+app.include_router(lut_certificates.router)
 app.include_router(receipts.router)
 app.include_router(reports.router)
+app.include_router(tax.router)
 
 
 @app.get("/health")

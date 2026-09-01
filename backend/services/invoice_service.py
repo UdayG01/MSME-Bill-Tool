@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +8,7 @@ from db import models, schemas
 from core.utils import fy_label_for
 from services.errors import ServiceError
 from services.financial import active_credit_total, active_receipts_total, invoice_totals
+from services import billing_settings_service, lut_service, tax_service
 
 
 def get_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoice:
@@ -28,6 +29,7 @@ def _replace_items(db: Session, invoice: models.Invoice, items) -> None:
         invoice.items.append(models.InvoiceItem(
             description=item.description,
             category=item.category,
+            hsn_sac=item.hsn_sac,
             qty=item.qty,
             rate=item.rate,
             amount=Decimal(item.qty) * Decimal(item.rate),
@@ -42,7 +44,20 @@ def _active_customer(db: Session, tenant_id: str, customer_id: str) -> models.Cu
 
 
 def _apply_draft(db: Session, invoice: models.Invoice, payload: schemas.InvoiceCreate, customer: models.Customer) -> None:
-    effective_rate, subtotal, gst_amount, total = invoice_totals(payload.items, payload.gst_rate, customer.is_foreign)
+    tenant = db.get(models.Tenant, invoice.tenant_id)
+    settings = billing_settings_service.get_settings(db, invoice.tenant_id)
+    currency = payload.document_currency.upper()
+    if customer.is_foreign:
+        if not settings.allow_export_invoicing:
+            raise ServiceError(409, "Export invoicing is not enabled in billing settings")
+        if currency == "INR" or not payload.exchange_rate_to_inr:
+            raise ServiceError(400, "Export invoices require a foreign currency and exchange rate")
+    elif currency != settings.base_currency:
+        raise ServiceError(400, "Domestic invoices must use the configured base currency")
+    document_subtotal = sum((Decimal(item.qty) * Decimal(item.rate) for item in payload.items), Decimal("0"))
+    subtotal_inr = document_subtotal if not customer.is_foreign else document_subtotal * Decimal(payload.exchange_rate_to_inr)
+    tax = tax_service.calculate_invoice_tax(db, invoice.tenant_id, tenant, customer, subtotal_inr, payload.gst_rate)
+    effective_rate, subtotal, gst_amount, total = tax["rate"], subtotal_inr, tax["gst"], subtotal_inr + tax["gst"]
     invoice.customer_id = customer.id
     invoice.invoice_date = payload.invoice_date
     invoice.order_no = payload.order_no
@@ -52,7 +67,18 @@ def _apply_draft(db: Session, invoice: models.Invoice, payload: schemas.InvoiceC
     invoice.gst_amount = gst_amount
     invoice.total = total
     invoice.is_export = customer.is_foreign
+    invoice.document_currency = currency
+    invoice.exchange_rate_to_inr = payload.exchange_rate_to_inr if customer.is_foreign else None
+    invoice.document_subtotal = document_subtotal if customer.is_foreign else subtotal
+    invoice.document_total = document_subtotal if customer.is_foreign else total
+    invoice.tax_treatment = tax["treatment"]
+    invoice.place_of_supply_code = tax["place_code"]
+    invoice.place_of_supply_name = tax["place_name"]
+    invoice.cgst_amount = tax["cgst"]
+    invoice.sgst_amount = tax["sgst"]
+    invoice.igst_amount = tax["igst"]
     invoice.credit_days = customer.credit_days
+    invoice.due_date = payload.invoice_date + timedelta(days=customer.credit_days or 0)
     _replace_items(db, invoice, payload.items)
 
 
@@ -94,6 +120,12 @@ def issue_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoic
     tenant = db.get(models.Tenant, tenant_id)
     customer = invoice.customer
     lut = db.query(models.LutMaster).filter_by(tenant_id=tenant_id).first()
+    settings = billing_settings_service.get_settings(db, tenant_id)
+    export_lut = None
+    if invoice.is_export and settings.require_valid_lut_for_export:
+        export_lut = lut_service.valid_active_lut(db, tenant_id, invoice.invoice_date)
+        if not export_lut:
+            raise ServiceError(409, "A valid active LUT certificate is required to issue this export invoice")
     fy_label = fy_label_for(invoice.invoice_date)
 
     for attempt in range(3):
@@ -111,6 +143,11 @@ def issue_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoic
             invoice.issued_at = datetime.utcnow()
             invoice.lut_no_snapshot = lut.lut_no if invoice.is_export and lut else ""
             invoice.lut_date_snapshot = lut.lut_date if invoice.is_export and lut else None
+            if export_lut:
+                invoice.lut_certificate_id = export_lut.id
+                invoice.lut_no_snapshot = export_lut.arn
+                invoice.lut_valid_from_snapshot = export_lut.valid_from
+                invoice.lut_valid_to_snapshot = export_lut.valid_to
             snapshot_fields = {
                 "company_name_snapshot": "company_name",
                 "company_address_snapshot": "address",

@@ -39,6 +39,9 @@ class Settings:
     session_cookie_samesite: str
     session_ttl_seconds: int
     log_level: str
+    media_storage_path: str
+    media_max_logo_bytes: int
+    media_max_signature_bytes: int
 
     @property
     def is_production(self) -> bool:
@@ -66,6 +69,9 @@ def get_settings() -> Settings:
         session_cookie_samesite=cookie_samesite,
         session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "28800")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        media_storage_path=os.getenv("MEDIA_STORAGE_PATH", str(BACKEND_DIR / "media")),
+        media_max_logo_bytes=int(os.getenv("MEDIA_MAX_LOGO_BYTES", "2097152")),
+        media_max_signature_bytes=int(os.getenv("MEDIA_MAX_SIGNATURE_BYTES", "1048576")),
     )
     if settings.is_production:
         if not os.getenv("DATABASE_URL"):

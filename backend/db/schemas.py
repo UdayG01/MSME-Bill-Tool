@@ -29,6 +29,14 @@ class CompanyUpdate(BaseModel):
     bank_name: Optional[str] = None
     bank_account: Optional[str] = None
     bank_ifsc: Optional[str] = None
+    udyam_number: Optional[str] = None
+    upi_id: Optional[str] = None
+    intl_bank_name: Optional[str] = None
+    intl_bank_account: Optional[str] = None
+    intl_swift_code: Optional[str] = None
+    intl_bank_address: Optional[str] = None
+    logo_asset_id: Optional[str] = None
+    signature_asset_id: Optional[str] = None
 
 
 class CompanyOut(BaseModel):
@@ -46,6 +54,14 @@ class CompanyOut(BaseModel):
     bank_name: str
     bank_account: str
     bank_ifsc: str
+    udyam_number: str
+    upi_id: str
+    intl_bank_name: str
+    intl_bank_account: str
+    intl_swift_code: str
+    intl_bank_address: str
+    logo_asset_id: Optional[str]
+    signature_asset_id: Optional[str]
 
 
 class LutUpdate(BaseModel):
@@ -70,6 +86,7 @@ class CustomerIn(BaseModel):
     country: str = "India"
     is_foreign: bool = False
     area: str = ""
+    state_code: str = ""
     credit_days: int = Field(default=30, ge=0, le=3650)
 
     @field_validator("name")
@@ -91,6 +108,7 @@ class CustomerOut(CustomerIn):
 class InvoiceItemIn(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     category: str = ""
+    hsn_sac: str = ""
     qty: Decimal = Field(default=Decimal("1"), gt=0)
     rate: Decimal = Field(default=Decimal("0"), ge=0)
 
@@ -116,6 +134,8 @@ class InvoiceCreate(BaseModel):
     order_date: Optional[date] = None
     gst_rate: Decimal = Field(default=Decimal("18"), ge=0, le=100)
     items: list[InvoiceItemIn] = Field(min_length=1)
+    document_currency: str = Field(default="INR", min_length=3, max_length=3)
+    exchange_rate_to_inr: Optional[Decimal] = Field(default=None, gt=0)
 
 
 class InvoiceOut(BaseModel):
@@ -133,6 +153,17 @@ class InvoiceOut(BaseModel):
     subtotal: Decimal
     gst_amount: Decimal
     total: Decimal
+    tax_treatment: str
+    place_of_supply_code: str
+    place_of_supply_name: str
+    cgst_amount: Decimal
+    sgst_amount: Decimal
+    igst_amount: Decimal
+    due_date: Optional[date]
+    document_currency: str
+    exchange_rate_to_inr: Optional[Decimal]
+    document_subtotal: Optional[Decimal]
+    document_total: Optional[Decimal]
     is_export: bool
     lut_no_snapshot: str
     lut_date_snapshot: Optional[date]
@@ -158,6 +189,10 @@ class ReceiptIn(BaseModel):
     date: date
     mode: str = ""
     reference: str = ""
+    receipt_currency: str = Field(default="INR", min_length=3, max_length=3)
+    foreign_amount: Optional[Decimal] = Field(default=None, gt=0)
+    exchange_rate_to_inr: Optional[Decimal] = Field(default=None, gt=0)
+    firc_number: str = ""
 
 
 class ReceiptUpdate(BaseModel):
@@ -165,6 +200,10 @@ class ReceiptUpdate(BaseModel):
     date: date
     mode: str = ""
     reference: str = ""
+    receipt_currency: str = Field(default="INR", min_length=3, max_length=3)
+    foreign_amount: Optional[Decimal] = Field(default=None, gt=0)
+    exchange_rate_to_inr: Optional[Decimal] = Field(default=None, gt=0)
+    firc_number: str = ""
 
 
 class ReceiptOut(ReceiptIn):
@@ -173,6 +212,44 @@ class ReceiptOut(ReceiptIn):
     status: str
     voided_at: Optional[datetime]
     void_reason: str
+    forex_gain_loss_inr: Optional[Decimal]
+
+
+class BillingSettingsUpdate(BaseModel):
+    base_currency: str = Field(default="INR", min_length=3, max_length=3)
+    allow_export_invoicing: bool = False
+    require_valid_lut_for_export: bool = True
+    terms_notes: str = ""
+    tagline: str = ""
+
+
+class BillingSettingsOut(BillingSettingsUpdate):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaxJurisdictionIn(BaseModel):
+    country_code: str = Field(default="IN", min_length=2, max_length=2)
+    code: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=255)
+    is_active: bool = True
+
+
+class TaxJurisdictionOut(TaxJurisdictionIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+
+
+class LutCertificateIn(BaseModel):
+    arn: str = Field(min_length=1, max_length=100)
+    financial_year: str = Field(min_length=4, max_length=9)
+    valid_from: date
+    valid_to: date
+
+
+class LutCertificateOut(LutCertificateIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    status: str
 
 
 class CreditNoteItemIn(InvoiceItemIn):

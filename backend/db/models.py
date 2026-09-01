@@ -37,12 +37,22 @@ class Tenant(Base):
     bank_name = Column(String(255), default="")
     bank_account = Column(String(50), default="")
     bank_ifsc = Column(String(20), default="")
+    udyam_number = Column(String(100), default="")
+    upi_id = Column(String(255), default="")
+    intl_bank_name = Column(String(255), default="")
+    intl_bank_account = Column(String(100), default="")
+    intl_swift_code = Column(String(50), default="")
+    intl_bank_address = Column(String(2000), default="")
+    logo_asset_id = Column(String(12), nullable=True)
+    signature_asset_id = Column(String(12), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     customers = relationship("Customer", back_populates="tenant", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="tenant", cascade="all, delete-orphan")
     lut = relationship("LutMaster", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    lut_certificates = relationship("LutCertificate", back_populates="tenant", cascade="all, delete-orphan")
+    billing_settings = relationship("BillingSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -82,6 +92,7 @@ class Customer(Base):
     country = Column(String(100), default="India")
     is_foreign = Column(Boolean, default=False)
     area = Column(String(255), default="")
+    state_code = Column(String(20), default="")
     credit_days = Column(Integer, default=30)
     is_archived = Column(Boolean, default=False, nullable=False)
     archived_at = Column(DateTime, nullable=True)
@@ -127,6 +138,20 @@ class Invoice(Base):
     lut_no_snapshot = Column(String(100), default="")
     lut_date_snapshot = Column(Date, nullable=True)
     credit_days = Column(Integer, default=30)
+    due_date = Column(Date, nullable=True)
+    tax_treatment = Column(String(50), default="")
+    place_of_supply_code = Column(String(20), default="")
+    place_of_supply_name = Column(String(255), default="")
+    cgst_amount = Column(Numeric(14, 2), default=0)
+    sgst_amount = Column(Numeric(14, 2), default=0)
+    igst_amount = Column(Numeric(14, 2), default=0)
+    document_currency = Column(String(3), default="INR")
+    exchange_rate_to_inr = Column(Numeric(18, 6), nullable=True)
+    document_subtotal = Column(Numeric(14, 2), nullable=True)
+    document_total = Column(Numeric(14, 2), nullable=True)
+    lut_certificate_id = Column(String(12), nullable=True)
+    lut_valid_from_snapshot = Column(Date, nullable=True)
+    lut_valid_to_snapshot = Column(Date, nullable=True)
 
     company_name_snapshot = Column(String(255), default="")
     company_address_snapshot = Column(String(2000), default="")
@@ -163,6 +188,7 @@ class InvoiceItem(Base):
     invoice_id = Column(String(12), ForeignKey("invoices.id"), nullable=False, index=True)
     description = Column(String(2000), default="")
     category = Column(String(255), default="")
+    hsn_sac = Column(String(50), default="")
     qty = Column(Numeric(12, 2), default=1)
     rate = Column(Numeric(14, 2), default=0)
     amount = Column(Numeric(14, 2), default=0)
@@ -180,6 +206,11 @@ class Receipt(Base):
     date = Column(Date, nullable=False)
     mode = Column(String(50), default="")
     reference = Column(String(255), default="")
+    receipt_currency = Column(String(3), default="INR")
+    foreign_amount = Column(Numeric(14, 2), nullable=True)
+    exchange_rate_to_inr = Column(Numeric(18, 6), nullable=True)
+    firc_number = Column(String(255), default="")
+    forex_gain_loss_inr = Column(Numeric(14, 2), nullable=True)
     status = Column(String(20), nullable=False, default="active", index=True)
     voided_at = Column(DateTime, nullable=True)
     void_reason = Column(String(2000), default="")
@@ -236,3 +267,59 @@ class CreditNoteItem(Base):
     amount = Column(Numeric(14, 2), default=0)
 
     credit_note = relationship("CreditNote", back_populates="items")
+
+
+class BillingSettings(Base):
+    __tablename__ = "billing_settings"
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, unique=True)
+    base_currency = Column(String(3), nullable=False, default="INR")
+    allow_export_invoicing = Column(Boolean, nullable=False, default=False)
+    require_valid_lut_for_export = Column(Boolean, nullable=False, default=True)
+    terms_notes = Column(String(4000), default="")
+    tagline = Column(String(255), default="")
+    tenant = relationship("Tenant", back_populates="billing_settings")
+
+
+class TaxJurisdiction(Base):
+    __tablename__ = "tax_jurisdictions"
+    __table_args__ = (UniqueConstraint("tenant_id", "country_code", "code", name="uq_tax_jurisdiction"),)
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, index=True)
+    country_code = Column(String(2), nullable=False, default="IN")
+    code = Column(String(20), nullable=False)
+    name = Column(String(255), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class LutCertificate(Base):
+    __tablename__ = "lut_certificates"
+    __table_args__ = (UniqueConstraint("tenant_id", "arn", name="uq_lut_certificate_arn"),)
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, index=True)
+    arn = Column(String(100), nullable=False)
+    financial_year = Column(String(9), nullable=False)
+    valid_from = Column(Date, nullable=False)
+    valid_to = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False, default="inactive")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    tenant = relationship("Tenant", back_populates="lut_certificates")
+
+
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, index=True)
+    purpose = Column(String(30), nullable=False)
+    storage_key = Column(String(500), nullable=False, unique=True)
+    mime_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    checksum = Column(String(64), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

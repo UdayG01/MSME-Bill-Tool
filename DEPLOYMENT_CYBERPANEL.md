@@ -133,6 +133,9 @@ SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_SAMESITE=lax
 SESSION_TTL_SECONDS=28800
 LOG_LEVEL=INFO
+MEDIA_STORAGE_PATH=/home/grovisor.co.in/apps/msme_bill_app/media
+MEDIA_MAX_LOGO_BYTES=2097152
+MEDIA_MAX_SIGNATURE_BYTES=1048576
 ```
 
 Install dependencies and create the schema:
@@ -145,6 +148,20 @@ pip install --upgrade pip
 pip install -r requirements.txt
 python scripts/upgrade_database.py
 ```
+
+### Private invoice-branding media
+
+Logo and signature uploads are stored privately, never below `public_html`.
+Create the configured directory before starting the backend:
+
+```bash
+mkdir -p /home/grovisor.co.in/apps/msme_bill_app/media
+chown msmebill:msmebill /home/grovisor.co.in/apps/msme_bill_app/media
+chmod 700 /home/grovisor.co.in/apps/msme_bill_app/media
+```
+
+Keep this directory in backups. The application validates image contents and
+size; do not create an OpenLiteSpeed static-file mapping for this directory.
 
 If local SQLite records must be retained, copy the current `backend/db/msme_billing.db` to the VPS before this step, then run the importer only after `upgrade_database.py` completes:
 
@@ -238,7 +255,9 @@ set -euo pipefail
 backup_dir=/home/grovisor.co.in/backups/msme_bill_app
 timestamp=$(date +%F_%H%M%S)
 mysqldump --single-transaction --routines --triggers grov_msme_billing_db | gzip > "$backup_dir/msme_billing_$timestamp.sql.gz"
+tar -C /home/grovisor.co.in/apps/msme_bill_app -czf "$backup_dir/msme_media_$timestamp.tar.gz" media
 find "$backup_dir" -type f -name 'msme_billing_*.sql.gz' -mtime +14 -delete
+find "$backup_dir" -type f -name 'msme_media_*.tar.gz' -mtime +14 -delete
 ```
 
 Make it executable, test it once, and schedule it daily at 02:15:

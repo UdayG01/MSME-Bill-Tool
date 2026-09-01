@@ -36,7 +36,14 @@ def create_receipt(db: Session, tenant_id: str, payload: schemas.ReceiptIn) -> m
     invoice = _issued_invoice(db, tenant_id, payload.invoice_id)
     if payload.amount > _maximum_receipt(db, invoice):
         raise ServiceError(409, "Receipt exceeds the current outstanding balance")
-    receipt = models.Receipt(tenant_id=tenant_id, **payload.model_dump())
+    data = payload.model_dump()
+    if invoice.is_export:
+        if data["receipt_currency"] != invoice.document_currency or not data["foreign_amount"] or not data["exchange_rate_to_inr"]:
+            raise ServiceError(400, "Export receipts require the invoice currency, foreign amount, and exchange rate")
+        data["amount"] = money(Decimal(data["foreign_amount"]) * Decimal(data["exchange_rate_to_inr"]))
+        expected = Decimal(invoice.exchange_rate_to_inr) * Decimal(data["foreign_amount"])
+        data["forex_gain_loss_inr"] = money(Decimal(data["amount"]) - expected)
+    receipt = models.Receipt(tenant_id=tenant_id, **data)
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
@@ -48,9 +55,15 @@ def update_receipt(db: Session, tenant_id: str, receipt_id: str, payload: schema
     if receipt.status != "active":
         raise ServiceError(409, "Only active receipts can be edited")
     invoice = _issued_invoice(db, tenant_id, receipt.invoice_id)
-    if payload.amount > _maximum_receipt(db, invoice, receipt.id):
+    data = payload.model_dump()
+    if invoice.is_export:
+        if data["receipt_currency"] != invoice.document_currency or not data["foreign_amount"] or not data["exchange_rate_to_inr"]:
+            raise ServiceError(400, "Export receipts require the invoice currency, foreign amount, and exchange rate")
+        data["amount"] = money(Decimal(data["foreign_amount"]) * Decimal(data["exchange_rate_to_inr"]))
+        data["forex_gain_loss_inr"] = money(Decimal(data["amount"]) - Decimal(invoice.exchange_rate_to_inr) * Decimal(data["foreign_amount"]))
+    if data["amount"] > _maximum_receipt(db, invoice, receipt.id):
         raise ServiceError(409, "Receipt exceeds the current outstanding balance")
-    for field, value in payload.model_dump().items():
+    for field, value in data.items():
         setattr(receipt, field, value)
     db.commit()
     db.refresh(receipt)
