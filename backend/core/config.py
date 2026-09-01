@@ -24,6 +24,8 @@ def _database_url(value: str | None) -> str:
         return value.replace("postgres://", "postgresql+psycopg://", 1)
     if value.startswith("postgresql://"):
         return value.replace("postgresql://", "postgresql+psycopg://", 1)
+    if value.startswith("mysql://"):
+        return value.replace("mysql://", "mysql+pymysql://", 1)
     return value
 
 

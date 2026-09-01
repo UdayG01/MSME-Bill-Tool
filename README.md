@@ -2,7 +2,7 @@
 
 A tenant-isolated billing application for small businesses that need to manage customers, invoices, receipts, credit notes, receivables, and basic sales analysis.
 
-For the complete production procedure, use the standalone [Deployment Runbook](DEPLOYMENT.md).
+For the Hostinger VPS, CyberPanel, and MariaDB production procedure, use [the CyberPanel deployment runbook](DEPLOYMENT_CYBERPANEL.md).
 
 ## What the application does
 
@@ -21,13 +21,13 @@ The implemented scope solves the current purpose: day-to-day billing and receiva
 ## Architecture
 
 ```text
-Vercel (React/Vite frontend)
+billing.grovisor.co.in (React/Vite static frontend via OpenLiteSpeed)
              |
              v
-Railway (FastAPI backend)
+api-billing.grovisor.co.in (OpenLiteSpeed reverse proxy -> FastAPI)
              |
              v
-Neon (PostgreSQL)
+MariaDB on the same Hostinger VPS
 ```
 
 ```text
@@ -37,7 +37,7 @@ backend/
   migrations/ Alembic schema history
   routers/    thin FastAPI HTTP endpoints
   services/   business rules used by routers
-  scripts/    database upgrade and SQLite-to-Postgres migration utilities
+  scripts/    database upgrade and SQLite-to-MariaDB migration utilities
   tests/      API workflow tests
 frontend/     React/Vite user interface
 ```
@@ -48,7 +48,7 @@ Keeping HTTP handling in `routers/` and business rules in `services/` is intenti
 
 The local SQLite database is [backend/db/msme_billing.db](backend/db/msme_billing.db). It is ignored by Git. A verified pre-change backup was created at `backups/20260816_113734/msme_billing.db`; the entire `backups/` directory is also ignored by Git.
 
-Production uses `DATABASE_URL`, so the same application runs with Neon PostgreSQL without code changes.
+Production uses `DATABASE_URL` with the local MariaDB server on the VPS. The development default remains SQLite.
 
 ### Why migrations are needed
 
@@ -56,8 +56,8 @@ Production uses `DATABASE_URL`, so the same application runs with Neon PostgreSQ
 
 - give every schema change a version and an ordered upgrade;
 - preserve existing invoice/customer data while adding new fields;
-- make local, test, and Neon schemas reproducible;
-- let each Railway deployment upgrade only what has not run yet;
+- make local, test, and MariaDB schemas reproducible;
+- let each VPS deployment upgrade only what has not run yet;
 - provide a reviewable downgrade path for schema changes.
 
 `scripts/upgrade_database.py` safely handles both cases. On a fresh database it runs every migration. On the original SQLite schema it first marks the existing tables as the baseline and then applies only the lifecycle changes.
@@ -81,17 +81,19 @@ npm run build
 
 Return to the repository root and run `run.bat` to open the backend at `http://localhost:8000` and frontend at `http://localhost:5173`. API documentation is at `http://localhost:8000/docs`.
 
-If Docker is available and PostgreSQL is preferred locally:
+If Docker is available, run the same MariaDB version used on the VPS locally:
 
 ```powershell
-docker compose up -d postgres
-$env:DATABASE_URL="postgresql://msme:local_dev_only@localhost:5432/msme_billing"
+docker compose up -d mariadb
+$env:DATABASE_URL="mysql+pymysql://msme:local_dev_only@localhost:3306/msme_billing?charset=utf8mb4"
 $env:MIGRATION_DATABASE_URL=$env:DATABASE_URL
 cd backend
 python scripts/upgrade_database.py
 ```
 
-## Deploy: Neon, Railway, then Vercel
+## Legacy hosted deployment notes
+
+> The remaining Neon, Railway, and Vercel notes below describe the original deployment option. They are not the current production path and do not match the MariaDB driver now used by this repository. Use [DEPLOYMENT_CYBERPANEL.md](DEPLOYMENT_CYBERPANEL.md) for this application.
 
 ### 1. Put the code in GitHub
 

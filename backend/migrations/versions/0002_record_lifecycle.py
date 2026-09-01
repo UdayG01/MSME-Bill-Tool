@@ -15,27 +15,33 @@ def upgrade():
         batch.add_column(sa.Column("updated_at", sa.DateTime(), nullable=True))
 
     with op.batch_alter_table("invoices") as batch:
-        batch.alter_column("invoice_no", existing_type=sa.String(), nullable=True)
-        batch.alter_column("fy_label", existing_type=sa.String(), nullable=True)
+        batch.alter_column("invoice_no", existing_type=sa.String(100), nullable=True)
+        batch.alter_column("fy_label", existing_type=sa.String(9), nullable=True)
         batch.alter_column("seq_no", existing_type=sa.Integer(), nullable=True)
-        batch.add_column(sa.Column("status", sa.String(), nullable=False, server_default="issued"))
+        batch.add_column(sa.Column("status", sa.String(20), nullable=False, server_default="issued"))
         for name in (
             "company_name_snapshot", "company_address_snapshot", "company_gstin_snapshot", "company_cin_snapshot",
             "company_email_snapshot", "company_phone_snapshot", "bank_name_snapshot", "bank_account_snapshot",
             "bank_ifsc_snapshot", "customer_name_snapshot", "customer_address_snapshot", "customer_gstin_snapshot",
             "customer_country_snapshot", "customer_area_snapshot",
         ):
-            batch.add_column(sa.Column(name, sa.String(), nullable=True, server_default=""))
+            length = 2000 if name in {"company_address_snapshot", "customer_address_snapshot"} else {
+                "company_name_snapshot": 255, "company_gstin_snapshot": 15, "company_cin_snapshot": 21,
+                "company_email_snapshot": 254, "company_phone_snapshot": 30, "bank_name_snapshot": 255,
+                "bank_account_snapshot": 50, "bank_ifsc_snapshot": 20, "customer_name_snapshot": 255,
+                "customer_gstin_snapshot": 15, "customer_country_snapshot": 100, "customer_area_snapshot": 255,
+            }[name]
+            batch.add_column(sa.Column(name, sa.String(length), nullable=True, server_default=""))
         batch.add_column(sa.Column("updated_at", sa.DateTime(), nullable=True))
         batch.add_column(sa.Column("issued_at", sa.DateTime(), nullable=True))
         batch.add_column(sa.Column("cancelled_at", sa.DateTime(), nullable=True))
-        batch.add_column(sa.Column("cancellation_reason", sa.String(), nullable=True, server_default=""))
+        batch.add_column(sa.Column("cancellation_reason", sa.String(2000), nullable=True, server_default=""))
         batch.create_index("ix_invoices_status", ["status"])
 
     with op.batch_alter_table("receipts") as batch:
-        batch.add_column(sa.Column("status", sa.String(), nullable=False, server_default="active"))
+        batch.add_column(sa.Column("status", sa.String(20), nullable=False, server_default="active"))
         batch.add_column(sa.Column("voided_at", sa.DateTime(), nullable=True))
-        batch.add_column(sa.Column("void_reason", sa.String(), nullable=True, server_default=""))
+        batch.add_column(sa.Column("void_reason", sa.String(2000), nullable=True, server_default=""))
         batch.add_column(sa.Column("updated_at", sa.DateTime(), nullable=True))
         batch.create_index("ix_receipts_status", ["status"])
 
@@ -62,23 +68,23 @@ def upgrade():
     """))
 
     op.create_table("credit_note_counters",
-        sa.Column("id", sa.String(), primary_key=True), sa.Column("tenant_id", sa.String(), sa.ForeignKey("tenants.id"), nullable=False),
-        sa.Column("fy_label", sa.String(), nullable=False), sa.Column("last_seq", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("id", sa.String(12), primary_key=True), sa.Column("tenant_id", sa.String(12), sa.ForeignKey("tenants.id"), nullable=False),
+        sa.Column("fy_label", sa.String(9), nullable=False), sa.Column("last_seq", sa.Integer(), nullable=False, server_default="0"),
         sa.UniqueConstraint("tenant_id", "fy_label", name="uq_credit_note_tenant_fy"))
     op.create_table("credit_notes",
-        sa.Column("id", sa.String(), primary_key=True), sa.Column("tenant_id", sa.String(), sa.ForeignKey("tenants.id"), nullable=False),
-        sa.Column("invoice_id", sa.String(), sa.ForeignKey("invoices.id"), nullable=False), sa.Column("credit_note_no", sa.String(), nullable=False),
-        sa.Column("fy_label", sa.String(), nullable=False), sa.Column("seq_no", sa.Integer(), nullable=False), sa.Column("date", sa.Date(), nullable=False),
-        sa.Column("reason", sa.String(), nullable=False), sa.Column("gst_rate", sa.Numeric(5, 2)), sa.Column("subtotal", sa.Numeric(14, 2)),
-        sa.Column("gst_amount", sa.Numeric(14, 2)), sa.Column("total", sa.Numeric(14, 2)), sa.Column("status", sa.String(), nullable=False, server_default="active"),
-        sa.Column("cancelled_at", sa.DateTime()), sa.Column("cancellation_reason", sa.String(), server_default=""), sa.Column("created_at", sa.DateTime()),
+        sa.Column("id", sa.String(12), primary_key=True), sa.Column("tenant_id", sa.String(12), sa.ForeignKey("tenants.id"), nullable=False),
+        sa.Column("invoice_id", sa.String(12), sa.ForeignKey("invoices.id"), nullable=False), sa.Column("credit_note_no", sa.String(100), nullable=False),
+        sa.Column("fy_label", sa.String(9), nullable=False), sa.Column("seq_no", sa.Integer(), nullable=False), sa.Column("date", sa.Date(), nullable=False),
+        sa.Column("reason", sa.String(2000), nullable=False), sa.Column("gst_rate", sa.Numeric(5, 2)), sa.Column("subtotal", sa.Numeric(14, 2)),
+        sa.Column("gst_amount", sa.Numeric(14, 2)), sa.Column("total", sa.Numeric(14, 2)), sa.Column("status", sa.String(20), nullable=False, server_default="active"),
+        sa.Column("cancelled_at", sa.DateTime()), sa.Column("cancellation_reason", sa.String(2000), server_default=""), sa.Column("created_at", sa.DateTime()),
         sa.UniqueConstraint("tenant_id", "fy_label", "seq_no", name="uq_credit_note_number"))
     op.create_index("ix_credit_notes_tenant_id", "credit_notes", ["tenant_id"])
     op.create_index("ix_credit_notes_invoice_id", "credit_notes", ["invoice_id"])
     op.create_index("ix_credit_notes_status", "credit_notes", ["status"])
     op.create_table("credit_note_items",
-        sa.Column("id", sa.String(), primary_key=True), sa.Column("credit_note_id", sa.String(), sa.ForeignKey("credit_notes.id"), nullable=False),
-        sa.Column("description", sa.String()), sa.Column("category", sa.String()), sa.Column("qty", sa.Numeric(12, 2)),
+        sa.Column("id", sa.String(12), primary_key=True), sa.Column("credit_note_id", sa.String(12), sa.ForeignKey("credit_notes.id"), nullable=False),
+        sa.Column("description", sa.String(2000)), sa.Column("category", sa.String(255)), sa.Column("qty", sa.Numeric(12, 2)),
         sa.Column("rate", sa.Numeric(14, 2)), sa.Column("amount", sa.Numeric(14, 2)))
     op.create_index("ix_credit_note_items_credit_note_id", "credit_note_items", ["credit_note_id"])
 
@@ -96,8 +102,8 @@ def downgrade():
         for name in ("cancellation_reason", "cancelled_at", "issued_at", "updated_at", "customer_area_snapshot", "customer_country_snapshot", "customer_gstin_snapshot", "customer_address_snapshot", "customer_name_snapshot", "bank_ifsc_snapshot", "bank_account_snapshot", "bank_name_snapshot", "company_phone_snapshot", "company_email_snapshot", "company_cin_snapshot", "company_gstin_snapshot", "company_address_snapshot", "company_name_snapshot", "status"):
             batch.drop_column(name)
         batch.alter_column("seq_no", existing_type=sa.Integer(), nullable=False)
-        batch.alter_column("fy_label", existing_type=sa.String(), nullable=False)
-        batch.alter_column("invoice_no", existing_type=sa.String(), nullable=False)
+        batch.alter_column("fy_label", existing_type=sa.String(9), nullable=False)
+        batch.alter_column("invoice_no", existing_type=sa.String(100), nullable=False)
     with op.batch_alter_table("customers") as batch:
         for name in ("updated_at", "archived_at", "is_archived"):
             batch.drop_column(name)
