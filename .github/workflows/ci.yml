@@ -32,6 +32,7 @@ jobs:
 
     env:
       APP_ENV: test
+      PYTHONPATH: ${{ github.workspace }}/backend
       DATABASE_URL: mysql+pymysql://root:ci-password@127.0.0.1:3306/msme_billing_ci?charset=utf8mb4
       MIGRATION_DATABASE_URL: mysql+pymysql://root:ci-password@127.0.0.1:3306/msme_billing_ci?charset=utf8mb4
       FRONTEND_ORIGINS: http://testserver
