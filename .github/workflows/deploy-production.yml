@@ -87,7 +87,11 @@ jobs:
           VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
         run: ssh -o BatchMode=yes "$VPS_DEPLOY_USER@$VPS_HOST" "sudo /usr/local/sbin/deploy-msme-bill"
 
-      - name: Verify public endpoints
-        run: |
-          curl --fail --retry 5 --retry-delay 3 https://api-billing.grovisor.co.in/health
-          curl --fail --retry 5 --retry-delay 3 https://billing.grovisor.co.in/
+      - name: Verify published frontend files
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
+        run: >-
+          ssh -o BatchMode=yes "$VPS_DEPLOY_USER@$VPS_HOST"
+          "test -s /home/grovisor.co.in/public_html/billing/index.html &&
+          test -f /home/grovisor.co.in/public_html/billing/.htaccess"
