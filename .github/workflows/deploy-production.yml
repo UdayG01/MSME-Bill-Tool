@@ -62,20 +62,20 @@ jobs:
           APP_DIR=/home/grovisor.co.in/apps/msme_bill_app
           WEB_DIR=/home/grovisor.co.in/public_html/billing
 
-          rsync -az --delete \
+          rsync -az --delete --no-times --no-perms --no-owner --no-group \
             --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude 'db/*.db' \
             backend/ "$REMOTE:$APP_DIR/backend/"
 
-          rsync -az --delete \
+          rsync -az --delete --no-times --no-perms --no-owner --no-group \
             --exclude 'node_modules/' \
             --exclude 'dist/' \
             frontend/ "$REMOTE:$APP_DIR/frontend/"
 
-          rsync -az --delete deployment/ "$REMOTE:$APP_DIR/deployment/"
+          rsync -az --delete --no-times --no-perms --no-owner --no-group deployment/ "$REMOTE:$APP_DIR/deployment/"
 
-          rsync -az --delete \
+          rsync -az --delete --no-times --no-perms --no-owner --no-group \
             --exclude '.well-known/' \
             frontend/dist/ "$REMOTE:$WEB_DIR/"
 
