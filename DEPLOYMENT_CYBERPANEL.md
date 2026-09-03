@@ -346,10 +346,10 @@ Never add `DATABASE_URL`, MariaDB passwords, `.env`, or media files as GitHub se
 
 ### Workflows to add
 
-Create two workflow files under `.github/workflows/`:
+The repository contains these two workflow files under `.github/workflows/`:
 
-1. `ci.yml` runs on pull requests and pushes. It installs Python dependencies, runs `pytest`, starts a MariaDB service for a migration smoke test, installs Node 20, and runs `npm ci` plus `npm run build` in `frontend/`.
-2. `deploy-production.yml` runs only after successful CI for a push to `main`. It builds the frontend with `VITE_API_BASE_URL=https://api-billing.grovisor.co.in`, connects as `msmedeploy`, synchronizes only approved source paths, publishes the built frontend to `/home/grovisor.co.in/public_html/billing`, invokes the restricted VPS deployment wrapper, and verifies both health URLs.
+1. `ci.yml` runs on pull requests and pushes. It installs Python dependencies, runs `pytest`, starts MariaDB 10.11 for a migration smoke test, installs Node 20, and runs `npm ci` plus `npm run build` in `frontend/`.
+2. `deploy-production.yml` runs only after successful CI for a push to `main`. It checks out the exact tested commit, builds the frontend with `VITE_API_BASE_URL=https://api-billing.grovisor.co.in`, connects as `msmedeploy`, synchronizes only approved source paths, publishes the built frontend to `/home/grovisor.co.in/public_html/billing`, invokes the restricted VPS deployment wrapper, and verifies both public URLs.
 
 The remote sync must preserve these VPS-only paths:
 
@@ -357,7 +357,6 @@ The remote sync must preserve these VPS-only paths:
 .env
 backend/.venv/
 media/
-logs/
 backups/
 ```
 

@@ -1,0 +1,93 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows:
+      - Continuous Integration
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: msme-bill-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://api-billing.grovisor.co.in
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Synchronize application source and website
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
+        run: |
+          REMOTE="$VPS_DEPLOY_USER@$VPS_HOST"
+          APP_DIR=/home/grovisor.co.in/apps/msme_bill_app
+          WEB_DIR=/home/grovisor.co.in/public_html/billing
+
+          rsync -az --delete \
+            --exclude '.venv/' \
+            --exclude '__pycache__/' \
+            --exclude 'db/*.db' \
+            backend/ "$REMOTE:$APP_DIR/backend/"
+
+          rsync -az --delete \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            frontend/ "$REMOTE:$APP_DIR/frontend/"
+
+          rsync -az --delete deployment/ "$REMOTE:$APP_DIR/deployment/"
+
+          rsync -az --delete \
+            --exclude '.well-known/' \
+            frontend/dist/ "$REMOTE:$WEB_DIR/"
+
+          rsync -az deployment/cyberpanel/frontend/.htaccess "$REMOTE:$WEB_DIR/.htaccess"
+
+      - name: Install dependencies, migrate, restart, and verify locally
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
+        run: ssh -o BatchMode=yes "$VPS_DEPLOY_USER@$VPS_HOST" "sudo /usr/local/sbin/deploy-msme-bill"
+
+      - name: Verify public endpoints
+        run: |
+          curl --fail --retry 5 --retry-delay 3 https://api-billing.grovisor.co.in/health
+          curl --fail --retry 5 --retry-delay 3 https://billing.grovisor.co.in/
