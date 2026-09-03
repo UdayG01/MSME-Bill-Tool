@@ -1,16 +1,31 @@
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
 
+function errorDetail(detail) {
+  if (Array.isArray(detail)) {
+    return detail.map((error) => {
+      const field = error.loc?.filter((part) => part !== "body").join(". ");
+      return field ? `${field}: ${error.msg}` : error.msg;
+    }).join("; ");
+  }
+  return typeof detail === "string" ? detail : JSON.stringify(detail);
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach the server. Check your internet connection and try again. (${error.message})`);
+  }
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = `Request failed (HTTP ${res.status}${res.statusText ? `: ${res.statusText}` : ""})`;
     try {
       const body = await res.json();
-      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || body);
+      detail = errorDetail(body.detail || body);
     } catch (_) {}
     throw new Error(detail);
   }

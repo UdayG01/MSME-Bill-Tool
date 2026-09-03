@@ -1,6 +1,9 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from core.config import get_settings
 from routers import auth, billing_settings, company, credit_notes, customers, invoices, lut_certificates, receipts, reports, tax
@@ -8,11 +11,30 @@ from services.errors import ServiceError
 
 settings = get_settings()
 app = FastAPI(title="MSME Billing & Receivable Tool")
+logger = logging.getLogger(__name__)
 
 
 @app.exception_handler(ServiceError)
 def service_error_handler(_request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(SQLAlchemyError)
+def database_error_handler(request: Request, exc: SQLAlchemyError):
+    logger.exception("Database error while handling %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "The data could not be saved. Check the field values and try again."},
+    )
+
+
+@app.exception_handler(Exception)
+def unexpected_error_handler(request: Request, exc: Exception):
+    logger.exception("Unexpected error while handling %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "The request could not be completed. Please try again."},
+    )
 
 app.add_middleware(
     CORSMiddleware,

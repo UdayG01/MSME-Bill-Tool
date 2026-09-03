@@ -16,6 +16,7 @@ def signup(client):
         "company_name": "Acme Services Private Limited",
         "address": "Bengaluru, Karnataka",
         "gstin": "29ABCDE1234F1Z5",
+        "state_code": "29",
         "invoice_prefix": "ACME",
         "bank_name": "Example Bank",
         "bank_account": "1234567890",
@@ -31,8 +32,20 @@ def customer_payload(name="Northwind", area="South"):
         "country": "India",
         "is_foreign": False,
         "area": area,
+        "state_code": "29",
         "credit_days": 30,
     }
+
+
+def test_state_codes_are_validated_before_a_database_write(client):
+    signup(client)
+    response = client.put("/company", json={"state_code": "Haryana"})
+    assert response.status_code == 422
+    assert "two-digit code" in response.text
+
+    response = client.post("/customers", json={**customer_payload(), "state_code": "Haryana"})
+    assert response.status_code == 422
+    assert "two-digit code" in response.text
 
 
 def invoice_payload(customer_id, rate=1000):

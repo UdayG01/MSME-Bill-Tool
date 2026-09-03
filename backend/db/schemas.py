@@ -5,6 +5,15 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
+def _validate_state_code(value: str | None) -> str | None:
+    if value is None:
+        return value
+    value = value.strip()
+    if value and (len(value) != 2 or not value.isdigit()):
+        raise ValueError("GST state code must be a two-digit code, for example 06 for Haryana")
+    return value
+
+
 class SignupIn(BaseModel):
     company_name: str = Field(min_length=1, max_length=200)
     email: EmailStr
@@ -37,6 +46,11 @@ class CompanyUpdate(BaseModel):
     intl_bank_address: Optional[str] = None
     logo_asset_id: Optional[str] = None
     signature_asset_id: Optional[str] = None
+
+    @field_validator("state_code")
+    @classmethod
+    def validate_state_code(cls, value: str | None) -> str | None:
+        return _validate_state_code(value)
 
 
 class CompanyOut(BaseModel):
@@ -96,6 +110,11 @@ class CustomerIn(BaseModel):
         if not value:
             raise ValueError("Customer name is required")
         return value
+
+    @field_validator("state_code")
+    @classmethod
+    def validate_state_code(cls, value: str) -> str:
+        return _validate_state_code(value) or ""
 
 
 class CustomerOut(CustomerIn):
