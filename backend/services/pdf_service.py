@@ -107,8 +107,11 @@ def _items_table(items, currency="INR", styles=None):
     for index, item in enumerate(items, start=1):
         name = escape(getattr(item, "item_name", "") or item.description)
         detail = escape(getattr(item, "item_description", "") or "")
+        description = f"<b>{name}</b>"
+        if detail:
+            description += f'<br/><font size=7 color="#666666">{detail}</font>'
         rows.append([
-            str(index), Paragraph(f"<b>{name}</b>{'<br/><font size=7 color=\"#666666\">' + detail + '</font>' if detail else ''}", styles["Normal"]) if styles else name, getattr(item, "hsn_sac", "") or "-", f"{Decimal(item.qty):,.2f}",
+            str(index), Paragraph(description, styles["Normal"]) if styles else name, getattr(item, "hsn_sac", "") or "-", f"{Decimal(item.qty):,.2f}",
             _fmt(item.rate, currency), _fmt(item.amount, currency),
         ])
     table = Table(rows, colWidths=[10 * mm, 82 * mm, 20 * mm, 14 * mm, 24 * mm, 30 * mm], repeatRows=1)
