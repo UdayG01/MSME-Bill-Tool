@@ -90,7 +90,22 @@ def _document(title: str):
 
 
 def _metadata_table(rows):
-    table = Table(rows, colWidths=[30 * mm, 60 * mm, 28 * mm, CONTENT_WIDTH - 118 * mm])
+    cell_style = ParagraphStyle(
+        name="MetadataCell",
+        parent=getSampleStyleSheet()["Normal"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.black,
+        wordWrap="CJK",
+    )
+    wrapped_rows = [
+        [
+            Paragraph(escape(str(value)).replace("\n", "<br/>"), cell_style)
+            for value in row
+        ]
+        for row in rows
+    ]
+    table = Table(wrapped_rows, colWidths=[30 * mm, 60 * mm, 28 * mm, CONTENT_WIDTH - 118 * mm])
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f2f2f2")),
