@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from datetime import date
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from db import schemas, get_db
@@ -9,8 +10,8 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.get("/receivables", response_model=list[schemas.ReceivableRow])
-def receivables(session=Depends(get_current_session), db: Session = Depends(get_db)):
-    return report_service.receivables(db, session["tenant_id"])
+def receivables(as_of: date | None = Query(default=None), session=Depends(get_current_session), db: Session = Depends(get_db)):
+    return report_service.receivables(db, session["tenant_id"], as_of)
 
 
 @router.get("/sales/area-wise", response_model=list[schemas.SalesBreakdownRow])

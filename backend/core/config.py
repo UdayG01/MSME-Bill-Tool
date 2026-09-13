@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,19 @@ def _database_url(value: str | None) -> str:
     if value.startswith("mysql://"):
         return value.replace("mysql://", "mysql+pymysql://", 1)
     return value
+
+
+def _is_exact_web_origin(origin: str) -> bool:
+    parsed = urlsplit(origin)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == ""
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 @dataclass(frozen=True)
@@ -76,8 +90,16 @@ def get_settings() -> Settings:
     if settings.is_production:
         if not os.getenv("DATABASE_URL"):
             raise RuntimeError("DATABASE_URL is required when APP_ENV=production")
-        if not settings.frontend_origins or any("localhost" in origin for origin in settings.frontend_origins):
-            raise RuntimeError("FRONTEND_ORIGINS must contain the deployed frontend URL in production")
+        if (
+            not settings.frontend_origins
+            or any(
+                not _is_exact_web_origin(origin)
+                or "localhost" in origin
+                or "127.0.0.1" in origin
+                for origin in settings.frontend_origins
+            )
+        ):
+            raise RuntimeError("FRONTEND_ORIGINS must contain only exact deployed frontend URLs in production; wildcards and local origins are forbidden")
         if not settings.session_cookie_secure:
             raise RuntimeError("SESSION_COOKIE_SECURE must be true in production")
     return settings

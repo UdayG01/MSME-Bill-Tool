@@ -1,9 +1,17 @@
 from datetime import date
+from io import BytesIO
+import re
+
+from PIL import Image as PILImage, ImageDraw
 
 
 def assert_status(response, expected):
     assert response.status_code == expected, response.text
     return response
+
+
+def pdf_page_count(content: bytes) -> int:
+    return len(re.findall(rb"/Type\s*/Page\b", content))
 
 
 def signup(client):
@@ -43,6 +51,24 @@ def test_state_codes_are_validated_before_a_database_write(client):
     assert response.status_code == 422
     assert "two-digit code" in response.text
 
+
+def test_authenticated_live_exchange_rate_endpoint(client, monkeypatch):
+    signup(client)
+    monkeypatch.setattr(
+        "routers.exchange_rates.current_rate_to_inr",
+        lambda currency: {
+            "base_currency": currency.upper(),
+            "quote_currency": "INR",
+            "rate": "85.25",
+            "rate_date": str(date.today()),
+            "source": "Frankfurter",
+        },
+    )
+    response = assert_status(client.get("/exchange-rates/usd/inr"), 200).json()
+    assert response["base_currency"] == "USD"
+    assert float(response["rate"]) == 85.25
+    assert response["source"] == "Frankfurter"
+
     response = client.post("/customers", json={**customer_payload(), "state_code": "Haryana"})
     assert response.status_code == 422
     assert "two-digit code" in response.text
@@ -69,6 +95,8 @@ def test_invoice_lifecycle_pdf_and_customer_archival(client):
     updated_payload = invoice_payload(customer["id"], rate=1200)
     draft = assert_status(client.put(f"/invoices/{draft['id']}", json=updated_payload), 200).json()
     assert float(draft["total"]) == 1416
+    assert draft["order_no"] == "PO-100"
+    assert draft["order_date"] == str(date.today())
 
     issued = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
     assert issued["status"] == "issued"
@@ -79,12 +107,45 @@ def test_invoice_lifecycle_pdf_and_customer_archival(client):
     pdf = assert_status(client.get(f"/invoices/{draft['id']}/pdf"), 200)
     assert pdf.headers["content-type"] == "application/pdf"
     assert pdf.content.startswith(b"%PDF")
+    assert pdf_page_count(pdf.content) == 1
 
     archived = assert_status(client.post(f"/customers/{customer['id']}/archive"), 200).json()
     assert archived["is_archived"] is True
     assert_status(client.post("/invoices", json=invoice_payload(customer["id"])), 404)
     assert_status(client.post(f"/customers/{customer['id']}/restore"), 200)
     assert_status(client.delete(f"/customers/{customer['id']}"), 409)
+
+
+def test_current_logo_is_used_when_an_older_invoice_has_no_logo_snapshot(client):
+    signup(client)
+    customer = assert_status(client.post("/customers", json=customer_payload()), 201).json()
+    draft = assert_status(client.post("/invoices", json=invoice_payload(customer["id"])), 201).json()
+    invoice = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
+
+    logo_file = BytesIO()
+    logo_image = PILImage.new("RGB", (300, 300), "white")
+    ImageDraw.Draw(logo_image).rectangle((100, 105, 200, 185), fill="black")
+    logo_image.save(logo_file, format="JPEG")
+    logo = logo_file.getvalue()
+    uploaded = assert_status(client.post(
+        "/company/media/logo",
+        files={"file": ("logo.jpg", logo, "image/jpeg")},
+    ), 201).json()
+    assert uploaded["width"] < 150
+    assert uploaded["height"] < 130
+
+    preview = assert_status(client.post("/company/invoice-preview", json={
+        "company_name": "Preview Company",
+        "logo_asset_id": uploaded["id"],
+    }), 200)
+    assert preview.content.startswith(b"%PDF")
+    assert b"/Subtype /Image" in preview.content
+
+    pdf = assert_status(client.get(f"/invoices/{invoice['id']}/pdf"), 200)
+    assert b"/Subtype /Image" in pdf.content
+
+    assert_status(client.delete("/company/media/logo"), 204)
+    assert assert_status(client.get("/company"), 200).json()["logo_asset_id"] is None
 
 
 def test_receipts_credit_notes_reports_and_cancellation_rules(client):
@@ -137,3 +198,98 @@ def test_tenant_isolation(client):
     }), 201)
     assert assert_status(client.get("/customers?include_archived=true"), 200).json() == []
     assert_status(client.get(f"/customers/{first_customer['id']}"), 404)
+
+
+def test_export_values_freeze_and_full_receipt_records_forex_without_false_balance(client):
+    signup(client)
+    assert_status(client.put("/settings/billing", json={
+        "base_currency": "INR",
+        "allow_export_invoicing": True,
+        "require_valid_lut_for_export": True,
+        "terms_notes": "",
+        "tagline": "",
+    }), 200)
+    customer = assert_status(client.post("/customers", json={
+        "name": "Overseas Customer",
+        "address": "Singapore",
+        "gstin": "",
+        "country": "Singapore",
+        "is_foreign": True,
+        "area": "Export",
+        "state_code": "",
+        "credit_days": 30,
+    }), 201).json()
+    lut = assert_status(client.post("/lut-certificates", json={
+        "arn": "AD290626000001",
+        "financial_year": "2026-27",
+        "valid_from": "2020-04-01",
+        "valid_to": "2099-03-31",
+    }), 201).json()
+    assert_status(client.post(f"/lut-certificates/{lut['id']}/activate"), 200)
+
+    payload = {
+        "customer_id": customer["id"],
+        "invoice_date": str(date.today()),
+        "gst_rate": 0,
+        "document_currency": "USD",
+        "exchange_rate_to_inr": 80,
+        "items": [{"item_name": "Export service", "hsn_sac": "9983", "qty": 1, "rate": 100}],
+    }
+    draft = assert_status(client.post("/invoices", json=payload), 201).json()
+    assert float(draft["total"]) == 8000
+    assert_status(client.put(f"/invoices/{draft['id']}", json={**payload, "exchange_rate_to_inr": 81}), 409)
+    invoice = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
+
+    receipt = assert_status(client.post("/receipts", json={
+        "invoice_id": invoice["id"],
+        "amount": 8500,
+        "date": str(date.today()),
+        "mode": "Bank Transfer",
+        "reference": "FIRC-UTR-1",
+        "receipt_currency": "USD",
+        "foreign_amount": 100,
+        "exchange_rate_to_inr": 85,
+        "firc_number": "FIRC-1",
+    }), 201).json()
+    assert float(receipt["amount"]) == 8500
+    assert float(receipt["applied_amount_inr"]) == 8000
+    assert float(receipt["forex_gain_loss_inr"]) == 500
+    assert assert_status(client.get("/reports/receivables"), 200).json() == []
+
+    loss_draft = assert_status(client.post("/invoices", json=payload), 201).json()
+    loss_invoice = assert_status(client.post(f"/invoices/{loss_draft['id']}/issue"), 200).json()
+    loss_receipt = assert_status(client.post("/receipts", json={
+        "invoice_id": loss_invoice["id"],
+        "amount": 7500,
+        "date": str(date.today()),
+        "mode": "Bank Transfer",
+        "reference": "FIRC-UTR-2",
+        "receipt_currency": "USD",
+        "foreign_amount": 100,
+        "exchange_rate_to_inr": 75,
+        "firc_number": "FIRC-2",
+    }), 201).json()
+    assert float(loss_receipt["amount"]) == 7500
+    assert float(loss_receipt["applied_amount_inr"]) == 8000
+    assert float(loss_receipt["forex_gain_loss_inr"]) == -500
+    assert assert_status(client.get("/reports/receivables"), 200).json() == []
+
+
+def test_twenty_item_invoice_generates_multiple_pdf_pages(client):
+    signup(client)
+    customer = assert_status(client.post("/customers", json=customer_payload()), 201).json()
+    payload = invoice_payload(customer["id"])
+    payload["items"] = [
+        {
+            "item_name": f"Professional service line {index}",
+            "item_description": "Detailed service description that wraps cleanly beneath the item name.",
+            "hsn_sac": "9983",
+            "qty": 1,
+            "rate": 100,
+        }
+        for index in range(1, 21)
+    ]
+    draft = assert_status(client.post("/invoices", json=payload), 201).json()
+    invoice = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
+    pdf = assert_status(client.get(f"/invoices/{invoice['id']}/pdf"), 200)
+    assert pdf_page_count(pdf.content) >= 2

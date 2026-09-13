@@ -20,7 +20,7 @@ def invoice_totals(items, gst_rate: Decimal, is_export: bool) -> tuple[Decimal, 
 
 
 def active_receipts_total(db: Session, invoice_id: str, exclude_id: str | None = None) -> Decimal:
-    query = db.query(func.coalesce(func.sum(models.Receipt.amount), 0)).filter(
+    query = db.query(func.coalesce(func.sum(func.coalesce(models.Receipt.applied_amount_inr, models.Receipt.amount)), 0)).filter(
         models.Receipt.invoice_id == invoice_id,
         models.Receipt.status == "active",
     )
@@ -45,4 +45,3 @@ def invoice_balance(db: Session, invoice: models.Invoice) -> Decimal:
         - active_credit_total(db, invoice.id)
         - active_receipts_total(db, invoice.id)
     )
-

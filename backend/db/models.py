@@ -50,7 +50,6 @@ class Tenant(Base):
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     customers = relationship("Customer", back_populates="tenant", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="tenant", cascade="all, delete-orphan")
-    lut = relationship("LutMaster", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     lut_certificates = relationship("LutCertificate", back_populates="tenant", cascade="all, delete-orphan")
     billing_settings = relationship("BillingSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
 
@@ -69,6 +68,13 @@ class User(Base):
 
 
 class LutMaster(Base):
+    """Legacy table mapping retained only to protect existing client data.
+
+    Active application logic uses LutCertificate. Keeping this table in model
+    metadata prevents future schema tooling from treating historical rows as a
+    table that should be dropped.
+    """
+
     __tablename__ = "lut_master"
 
     id = Column(String(12), primary_key=True, default=gen_id)
@@ -77,8 +83,6 @@ class LutMaster(Base):
     lut_date = Column(Date, nullable=True)
     valid_from = Column(Date, nullable=True)
     valid_to = Column(Date, nullable=True)
-
-    tenant = relationship("Tenant", back_populates="lut")
 
 
 class Customer(Base):
@@ -111,6 +115,7 @@ class InvoiceCounter(Base):
     tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False)
     fy_label = Column(String(9), nullable=False)
     last_seq = Column(Integer, default=0, nullable=False)
+    configured_at = Column(DateTime, nullable=True)
 
 
 class Invoice(Base):
@@ -152,6 +157,8 @@ class Invoice(Base):
     lut_certificate_id = Column(String(12), nullable=True)
     lut_valid_from_snapshot = Column(Date, nullable=True)
     lut_valid_to_snapshot = Column(Date, nullable=True)
+    lut_financial_year_snapshot = Column(String(9), default="")
+    reverse_charge = Column(Boolean, nullable=False, default=False)
 
     company_name_snapshot = Column(String(255), default="")
     company_address_snapshot = Column(String(2000), default="")
@@ -162,6 +169,16 @@ class Invoice(Base):
     bank_name_snapshot = Column(String(255), default="")
     bank_account_snapshot = Column(String(50), default="")
     bank_ifsc_snapshot = Column(String(20), default="")
+    company_udyam_snapshot = Column(String(100), default="")
+    company_upi_snapshot = Column(String(255), default="")
+    intl_bank_name_snapshot = Column(String(255), default="")
+    intl_bank_account_snapshot = Column(String(100), default="")
+    intl_swift_code_snapshot = Column(String(50), default="")
+    intl_bank_address_snapshot = Column(String(2000), default="")
+    terms_notes_snapshot = Column(String(4000), default="")
+    tagline_snapshot = Column(String(255), default="")
+    logo_asset_id_snapshot = Column(String(12), nullable=True)
+    signature_asset_id_snapshot = Column(String(12), nullable=True)
     customer_name_snapshot = Column(String(255), default="")
     customer_address_snapshot = Column(String(2000), default="")
     customer_gstin_snapshot = Column(String(15), default="")
@@ -187,6 +204,8 @@ class InvoiceItem(Base):
     id = Column(String(12), primary_key=True, default=gen_id)
     invoice_id = Column(String(12), ForeignKey("invoices.id"), nullable=False, index=True)
     description = Column(String(2000), default="")
+    item_name = Column(String(500), default="")
+    item_description = Column(String(2000), default="")
     category = Column(String(255), default="")
     hsn_sac = Column(String(50), default="")
     qty = Column(Numeric(12, 2), default=1)
@@ -203,6 +222,10 @@ class Receipt(Base):
     tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, index=True)
     invoice_id = Column(String(12), ForeignKey("invoices.id"), nullable=False, index=True)
     amount = Column(Numeric(14, 2), nullable=False)
+    # INR carrying value cleared from accounts receivable. For domestic
+    # receipts this equals amount; for export receipts, amount is the INR cash
+    # actually realised and this field is the proportional frozen invoice INR.
+    applied_amount_inr = Column(Numeric(14, 2), nullable=True)
     date = Column(Date, nullable=False)
     mode = Column(String(50), default="")
     reference = Column(String(255), default="")

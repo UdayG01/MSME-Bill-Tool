@@ -9,6 +9,7 @@ TEST_DIR = Path(tempfile.mkdtemp(prefix="msme_billing_tests_"))
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_DIR / 'test.db').as_posix()}"
 os.environ["MIGRATION_DATABASE_URL"] = os.environ["DATABASE_URL"]
+os.environ["MEDIA_STORAGE_PATH"] = str(TEST_DIR / "media")
 os.environ["FRONTEND_ORIGINS"] = "http://testserver"
 os.environ["SESSION_COOKIE_SECURE"] = "false"
 

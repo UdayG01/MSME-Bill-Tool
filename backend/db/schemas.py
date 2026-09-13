@@ -2,7 +2,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+import re
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 def _validate_state_code(value: str | None) -> str | None:
@@ -78,21 +79,6 @@ class CompanyOut(BaseModel):
     signature_asset_id: Optional[str]
 
 
-class LutUpdate(BaseModel):
-    lut_no: Optional[str] = None
-    lut_date: Optional[date] = None
-    valid_from: Optional[date] = None
-    valid_to: Optional[date] = None
-
-
-class LutOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    lut_no: str
-    lut_date: Optional[date]
-    valid_from: Optional[date]
-    valid_to: Optional[date]
-
-
 class CustomerIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     address: str = ""
@@ -101,7 +87,7 @@ class CustomerIn(BaseModel):
     is_foreign: bool = False
     area: str = ""
     state_code: str = ""
-    credit_days: int = Field(default=30, ge=0, le=3650)
+    credit_days: int = Field(ge=0, le=3650)
 
     @field_validator("name")
     @classmethod
@@ -116,6 +102,20 @@ class CustomerIn(BaseModel):
     def validate_state_code(cls, value: str) -> str:
         return _validate_state_code(value) or ""
 
+    @model_validator(mode="after")
+    def validate_customer_type(self):
+        self.gstin = self.gstin.strip().upper()
+        self.country = self.country.strip()
+        if self.is_foreign:
+            if not self.country or self.country.lower() == "india":
+                raise ValueError("Foreign customers require a non-India country")
+            self.gstin, self.state_code = "", ""
+        else:
+            if not re.fullmatch(r"[0-9]{2}[A-Z0-9]{13}", self.gstin):
+                raise ValueError("Domestic customers require a valid 15-character GSTIN")
+            self.country, self.state_code = "India", self.gstin[:2]
+        return self
+
 
 class CustomerOut(CustomerIn):
     model_config = ConfigDict(from_attributes=True)
@@ -125,19 +125,22 @@ class CustomerOut(CustomerIn):
 
 
 class InvoiceItemIn(BaseModel):
-    description: str = Field(min_length=1, max_length=500)
+    description: str = Field(default="", max_length=2000)
+    item_name: str = Field(default="", max_length=500)
+    item_description: str = Field(default="", max_length=2000)
     category: str = ""
     hsn_sac: str = ""
     qty: Decimal = Field(default=Decimal("1"), gt=0)
     rate: Decimal = Field(default=Decimal("0"), ge=0)
 
-    @field_validator("description")
-    @classmethod
-    def clean_description(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Line item description is required")
-        return value
+    @model_validator(mode="after")
+    def normalize_line_item(self):
+        self.item_name = self.item_name.strip() or self.description.strip()
+        if not self.item_name:
+            raise ValueError("Line item name is required")
+        self.item_description = self.item_description.strip()
+        self.description = self.item_description or self.item_name
+        return self
 
 
 class InvoiceItemOut(InvoiceItemIn):
@@ -149,12 +152,13 @@ class InvoiceItemOut(InvoiceItemIn):
 class InvoiceCreate(BaseModel):
     customer_id: str
     invoice_date: date
-    order_no: str = ""
+    order_no: str = Field(default="", max_length=100)
     order_date: Optional[date] = None
     gst_rate: Decimal = Field(default=Decimal("18"), ge=0, le=100)
     items: list[InvoiceItemIn] = Field(min_length=1)
     document_currency: str = Field(default="INR", min_length=3, max_length=3)
     exchange_rate_to_inr: Optional[Decimal] = Field(default=None, gt=0)
+    reverse_charge: bool = False
 
 
 class InvoiceOut(BaseModel):
@@ -184,8 +188,10 @@ class InvoiceOut(BaseModel):
     document_subtotal: Optional[Decimal]
     document_total: Optional[Decimal]
     is_export: bool
+    reverse_charge: bool
     lut_no_snapshot: str
     lut_date_snapshot: Optional[date]
+    lut_financial_year_snapshot: str
     credit_days: int
     customer_name_snapshot: str
     customer_address_snapshot: str
@@ -204,7 +210,9 @@ class ReasonIn(BaseModel):
 
 class ReceiptIn(BaseModel):
     invoice_id: str
-    amount: Decimal = Field(gt=0)
+    # Required for domestic receipts. Export receipts derive realised INR from
+    # foreign_amount and exchange_rate_to_inr in the service layer.
+    amount: Optional[Decimal] = Field(default=None, gt=0)
     date: date
     mode: str = ""
     reference: str = ""
@@ -215,7 +223,7 @@ class ReceiptIn(BaseModel):
 
 
 class ReceiptUpdate(BaseModel):
-    amount: Decimal = Field(gt=0)
+    amount: Optional[Decimal] = Field(default=None, gt=0)
     date: date
     mode: str = ""
     reference: str = ""
@@ -228,9 +236,11 @@ class ReceiptUpdate(BaseModel):
 class ReceiptOut(ReceiptIn):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    amount: Decimal
     status: str
     voided_at: Optional[datetime]
     void_reason: str
+    applied_amount_inr: Optional[Decimal]
     forex_gain_loss_inr: Optional[Decimal]
 
 
@@ -240,6 +250,43 @@ class BillingSettingsUpdate(BaseModel):
     require_valid_lut_for_export: bool = True
     terms_notes: str = ""
     tagline: str = ""
+
+    @field_validator("base_currency")
+    @classmethod
+    def base_currency_must_be_inr(cls, value: str) -> str:
+        if value.upper() != "INR":
+            raise ValueError("The domestic base currency must be INR")
+        return "INR"
+
+
+class InvoiceNumberSetupIn(BaseModel):
+    next_invoice_number: int = Field(ge=1, le=9_999_999)
+
+
+class InvoiceNumberSetupOut(BaseModel):
+    financial_year: str
+    next_invoice_number: int
+    locked: bool
+    manual_setup_available: bool
+    invoice_prefix: str
+
+
+class ExchangeRateReferenceOut(BaseModel):
+    base_currency: str
+    quote_currency: str
+    rate: Decimal
+    rate_date: date
+    source: str
+
+
+class MediaAssetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    purpose: str
+    mime_type: str
+    file_size: int
+    width: int
+    height: int
 
 
 class BillingSettingsOut(BillingSettingsUpdate):

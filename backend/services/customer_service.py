@@ -24,6 +24,7 @@ def create_customer(db: Session, tenant_id: str, payload: schemas.CustomerIn) ->
     data = payload.model_dump()
     if data["is_foreign"]:
         data["gstin"] = ""
+        data["state_code"] = ""
     customer = models.Customer(tenant_id=tenant_id, **data)
     db.add(customer)
     db.commit()
@@ -36,6 +37,7 @@ def update_customer(db: Session, tenant_id: str, customer_id: str, payload: sche
     data = payload.model_dump()
     if data["is_foreign"]:
         data["gstin"] = ""
+        data["state_code"] = ""
     for field, value in data.items():
         setattr(customer, field, value)
     db.commit()

@@ -28,21 +28,56 @@ def _maximum_receipt(db: Session, invoice: models.Invoice, exclude_id: str | Non
     return money(Decimal(invoice.total) - active_credit_total(db, invoice.id) - active_receipts_total(db, invoice.id, exclude_id))
 
 
+def _prepare_values(db: Session, invoice: models.Invoice, data: dict, exclude_id: str | None = None) -> dict:
+    """Calculate cash realised separately from the receivable carrying value.
+
+    An export customer settles the invoice in its document currency. Exchange
+    movement belongs in forex gain/loss and must not create an overpayment or
+    leave customer debt behind.
+    """
+    maximum = _maximum_receipt(db, invoice, exclude_id)
+    if invoice.is_export:
+        if data["receipt_currency"] != invoice.document_currency or not data["foreign_amount"] or not data["exchange_rate_to_inr"]:
+            raise ServiceError(400, "Export receipts require the invoice currency, foreign amount, and exchange rate")
+        if not invoice.document_total or Decimal(invoice.document_total) <= 0:
+            raise ServiceError(409, "The export invoice has no valid foreign-currency total")
+        realised = money(Decimal(data["foreign_amount"]) * Decimal(data["exchange_rate_to_inr"]))
+        applied = money(Decimal(invoice.total) * Decimal(data["foreign_amount"]) / Decimal(invoice.document_total))
+        # Tolerate only a one-paise proportional rounding difference on the
+        # final instalment; genuine excess foreign payment remains blocked.
+        if applied > maximum:
+            if applied - maximum <= Decimal("0.01"):
+                applied = maximum
+            else:
+                raise ServiceError(409, "Receipt exceeds the current outstanding balance")
+        data["amount"] = realised
+        data["applied_amount_inr"] = applied
+        data["forex_gain_loss_inr"] = money(realised - applied)
+    else:
+        if data["amount"] is None:
+            raise ServiceError(400, "Domestic receipts require an INR amount")
+        amount = money(Decimal(data["amount"]))
+        if amount > maximum:
+            raise ServiceError(409, "Receipt exceeds the current outstanding balance")
+        data.update({
+            "amount": amount,
+            "applied_amount_inr": amount,
+            "receipt_currency": "INR",
+            "foreign_amount": None,
+            "exchange_rate_to_inr": None,
+            "firc_number": "",
+            "forex_gain_loss_inr": None,
+        })
+    return data
+
+
 def list_receipts(db: Session, tenant_id: str):
     return db.query(models.Receipt).filter_by(tenant_id=tenant_id).order_by(models.Receipt.date.desc()).all()
 
 
 def create_receipt(db: Session, tenant_id: str, payload: schemas.ReceiptIn) -> models.Receipt:
     invoice = _issued_invoice(db, tenant_id, payload.invoice_id)
-    if payload.amount > _maximum_receipt(db, invoice):
-        raise ServiceError(409, "Receipt exceeds the current outstanding balance")
-    data = payload.model_dump()
-    if invoice.is_export:
-        if data["receipt_currency"] != invoice.document_currency or not data["foreign_amount"] or not data["exchange_rate_to_inr"]:
-            raise ServiceError(400, "Export receipts require the invoice currency, foreign amount, and exchange rate")
-        data["amount"] = money(Decimal(data["foreign_amount"]) * Decimal(data["exchange_rate_to_inr"]))
-        expected = Decimal(invoice.exchange_rate_to_inr) * Decimal(data["foreign_amount"])
-        data["forex_gain_loss_inr"] = money(Decimal(data["amount"]) - expected)
+    data = _prepare_values(db, invoice, payload.model_dump())
     receipt = models.Receipt(tenant_id=tenant_id, **data)
     db.add(receipt)
     db.commit()
@@ -55,14 +90,7 @@ def update_receipt(db: Session, tenant_id: str, receipt_id: str, payload: schema
     if receipt.status != "active":
         raise ServiceError(409, "Only active receipts can be edited")
     invoice = _issued_invoice(db, tenant_id, receipt.invoice_id)
-    data = payload.model_dump()
-    if invoice.is_export:
-        if data["receipt_currency"] != invoice.document_currency or not data["foreign_amount"] or not data["exchange_rate_to_inr"]:
-            raise ServiceError(400, "Export receipts require the invoice currency, foreign amount, and exchange rate")
-        data["amount"] = money(Decimal(data["foreign_amount"]) * Decimal(data["exchange_rate_to_inr"]))
-        data["forex_gain_loss_inr"] = money(Decimal(data["amount"]) - Decimal(invoice.exchange_rate_to_inr) * Decimal(data["foreign_amount"]))
-    if data["amount"] > _maximum_receipt(db, invoice, receipt.id):
-        raise ServiceError(409, "Receipt exceeds the current outstanding balance")
+    data = _prepare_values(db, invoice, payload.model_dump(), receipt.id)
     for field, value in data.items():
         setattr(receipt, field, value)
     db.commit()
@@ -87,7 +115,8 @@ def restore_receipt(db: Session, tenant_id: str, receipt_id: str) -> models.Rece
     if receipt.status != "voided":
         raise ServiceError(409, "Receipt is already active")
     invoice = _issued_invoice(db, tenant_id, receipt.invoice_id)
-    if Decimal(receipt.amount) > _maximum_receipt(db, invoice):
+    applied = Decimal(receipt.applied_amount_inr if receipt.applied_amount_inr is not None else receipt.amount)
+    if applied > _maximum_receipt(db, invoice):
         raise ServiceError(409, "Restoring this receipt would overpay the invoice")
     receipt.status = "active"
     receipt.voided_at = None

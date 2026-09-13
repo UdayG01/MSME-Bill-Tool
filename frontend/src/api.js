@@ -33,9 +33,31 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-async function openPdf(path, filename, download = false) {
+async function upload(path, file) {
+  const body = new FormData(); body.append("file", file);
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { method: "POST", credentials: "include", body });
+  } catch (error) {
+    throw new Error(`Unable to reach the server (${error.message})`);
+  }
+  if (!res.ok) {
+    let detail = `Request failed (HTTP ${res.status})`;
+    try {
+      const data = await res.json();
+      if (data.detail) detail = errorDetail(data.detail);
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+async function openPdf(path, filename, download = false, options = {}) {
   const preview = download ? null : window.open("", "_blank");
-  const res = await fetch(`${BASE_URL}${path}?download=${download}`, { credentials: "include" });
+  const res = await fetch(`${BASE_URL}${path}?download=${download}`, {
+    credentials: "include",
+    ...options,
+  });
   if (!res.ok) {
     preview?.close();
     throw new Error("Could not generate PDF");
@@ -63,13 +85,16 @@ export const api = {
 
   getCompany: () => request("/company"),
   updateCompany: (data) => request("/company", { method: "PUT", body: JSON.stringify(data) }),
-  getLut: () => request("/lut"),
-  updateLut: (data) => request("/lut", { method: "PUT", body: JSON.stringify(data) }),
+  uploadCompanyMedia: (purpose, file) => upload(`/company/media/${purpose}`, file),
+  removeCompanyMedia: (purpose) => request(`/company/media/${purpose}`, { method: "DELETE" }),
+  companyMediaUrl: (assetId) => `${BASE_URL}/company/media/${assetId}`,
+  previewCompanyInvoice: (data) => openPdf("/company/invoice-preview", "invoice-preview.pdf", false, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }),
   getBillingSettings: () => request("/settings/billing"),
   updateBillingSettings: (data) => request("/settings/billing", { method: "PUT", body: JSON.stringify(data) }),
-  listTaxJurisdictions: () => request("/tax-jurisdictions"),
-  createTaxJurisdiction: (data) => request("/tax-jurisdictions", { method: "POST", body: JSON.stringify(data) }),
-  updateTaxJurisdiction: (id, data) => request(`/tax-jurisdictions/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   listLutCertificates: () => request("/lut-certificates"),
   createLutCertificate: (data) => request("/lut-certificates", { method: "POST", body: JSON.stringify(data) }),
   activateLutCertificate: (id) => request(`/lut-certificates/${id}/activate`, { method: "POST" }),
@@ -80,29 +105,24 @@ export const api = {
   updateCustomer: (id, data) => request(`/customers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   archiveCustomer: (id) => request(`/customers/${id}/archive`, { method: "POST" }),
   restoreCustomer: (id) => request(`/customers/${id}/restore`, { method: "POST" }),
-  deleteCustomer: (id) => request(`/customers/${id}`, { method: "DELETE" }),
 
   listInvoices: () => request("/invoices"),
   createInvoice: (data) => request("/invoices", { method: "POST", body: JSON.stringify(data) }),
   updateInvoice: (id, data) => request(`/invoices/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   issueInvoice: (id) => request(`/invoices/${id}/issue`, { method: "POST" }),
-  cancelInvoice: (id, reason) => request(`/invoices/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: "DELETE" }),
-  getInvoice: (id) => request(`/invoices/${id}`),
   invoicePdf: (id, download = false) => openPdf(`/invoices/${id}/pdf`, "invoice.pdf", download),
 
   listReceipts: () => request("/receipts"),
   createReceipt: (data) => request("/receipts", { method: "POST", body: JSON.stringify(data) }),
-  updateReceipt: (id, data) => request(`/receipts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  voidReceipt: (id, reason) => request(`/receipts/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) }),
-  restoreReceipt: (id) => request(`/receipts/${id}/restore`, { method: "POST" }),
 
   listCreditNotes: () => request("/credit-notes"),
   createCreditNote: (invoiceId, data) => request(`/invoices/${invoiceId}/credit-notes`, { method: "POST", body: JSON.stringify(data) }),
-  cancelCreditNote: (id, reason) => request(`/credit-notes/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
-  creditNotePdf: (id, download = false) => openPdf(`/credit-notes/${id}/pdf`, "credit-note.pdf", download),
 
-  receivablesReport: () => request("/reports/receivables"),
+  receivablesReport: (asOf) => request(`/reports/receivables${asOf ? `?as_of=${asOf}` : ""}`),
+  getLiveExchangeRate: (currency) => request(`/exchange-rates/${currency}/inr`),
+  getNumberingSetup: () => request("/invoices/numbering-setup"),
+  setNumberingSetup: (data) => request("/invoices/numbering-setup", { method: "PUT", body: JSON.stringify(data) }),
   salesByArea: () => request("/reports/sales/area-wise"),
   salesByProduct: () => request("/reports/sales/product-wise"),
 };

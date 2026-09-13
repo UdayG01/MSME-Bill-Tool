@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -8,6 +9,16 @@ from services import invoice_service
 from services.pdf_service import build_invoice_pdf
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+
+@router.get("/numbering-setup", response_model=schemas.InvoiceNumberSetupOut)
+def get_numbering_setup(invoice_date: date = Query(default_factory=date.today), session=Depends(get_current_session), db: Session = Depends(get_db)):
+    return invoice_service.numbering_setup(db, session["tenant_id"], invoice_date)
+
+
+@router.put("/numbering-setup", response_model=schemas.InvoiceNumberSetupOut)
+def set_numbering_setup(payload: schemas.InvoiceNumberSetupIn, invoice_date: date = Query(default_factory=date.today), session=Depends(get_current_session), db: Session = Depends(get_db)):
+    return invoice_service.configure_numbering(db, session["tenant_id"], invoice_date, payload.next_invoice_number)
 
 
 @router.get("", response_model=list[schemas.InvoiceOut])

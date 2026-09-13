@@ -18,7 +18,7 @@ def signup(db: Session, payload: schemas.SignupIn) -> tuple[models.User, models.
         hashed_password=hash_password(payload.password),
         role="owner",
     )
-    db.add_all([user, models.LutMaster(tenant_id=tenant.id)])
+    db.add(user)
     try:
         db.commit()
     except IntegrityError:

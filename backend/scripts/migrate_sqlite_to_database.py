@@ -1,4 +1,4 @@
-"""Copy legacy SQLite records into a fresh MariaDB/MySQL database.
+"""Copy legacy SQLite records into a fresh configured SQL database.
 
 Run from backend after `alembic upgrade head`:
     python scripts/migrate_sqlite_to_database.py
@@ -29,11 +29,11 @@ def main() -> None:
     parser.add_argument("--target", default=os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL"))
     args = parser.parse_args()
     if not args.target:
-        raise SystemExit("Set MIGRATION_DATABASE_URL or DATABASE_URL to the MariaDB/MySQL connection URL")
+        raise SystemExit("Set MIGRATION_DATABASE_URL or DATABASE_URL to the target database URL")
 
     target_url = _database_url(args.target)
     if target_url.startswith("sqlite"):
-        raise SystemExit("The target must be MariaDB/MySQL, not SQLite")
+        raise SystemExit("The target must be a server database, not SQLite")
 
     source_engine = create_engine(f"sqlite:///{Path(args.source).resolve().as_posix()}")
     target_engine = create_engine(target_url, pool_pre_ping=True)
