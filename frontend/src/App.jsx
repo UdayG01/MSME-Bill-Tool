@@ -216,6 +216,7 @@ export default function App() {
             products={products.filter((product) => !product.is_archived)}
             invoice={editingInvoice}
             onSaved={loadAll}
+            onAddProduct={() => setTab("products")}
             onDone={() => {
               setEditingInvoice(null);
               setTab("invoices");

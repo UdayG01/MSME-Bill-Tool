@@ -20,6 +20,7 @@ export default function InvoiceEditor({
   products = [],
   invoice,
   onSaved,
+  onAddProduct,
   onDone,
 }) {
   const [customerId, setCustomerId] = useState("");
@@ -336,44 +337,84 @@ export default function InvoiceEditor({
                 {productPickerId === i.id && (
                   <div className="mt-3 ml-[52px] w-full max-w-xl border-t pt-3">
                     <div className="rounded border border-slate-200 bg-white shadow-sm">
-                      <div className="border-b border-slate-100 p-2">
-                        <input
-                          className={inputCls}
-                          autoFocus
-                          placeholder="Search products by name, description, or HSN/SAC"
-                          value={productSearch}
-                          onChange={(e) => setProductSearch(e.target.value)}
-                        />
-                      </div>
-                      <div className="max-h-56 overflow-y-auto">
-                        {matchingProducts.map((product) => (
-                          <button
-                            key={product.id}
-                            type="button"
-                            className="grid w-full grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm transition hover:bg-[#F5F3EE]"
-                            onClick={() => applyProduct(i.id, product.id)}
-                          >
-                            <span className="min-w-0">
-                              <span className="block font-semibold text-slate-800">{product.name}</span>
-                              <span className="block truncate text-xs text-slate-500">
-                                {product.description || "No description"}{product.hsn_sac ? ` - HSN/SAC ${product.hsn_sac}` : ""}
-                              </span>
-                            </span>
-                            <span className="whitespace-nowrap text-slate-700">
-                              INR {formatMoney(product.amount)}
-                            </span>
-                          </button>
-                        ))}
-                        {matchingProducts.length === 0 && (
-                          <div className="px-3 py-4 text-sm text-slate-500">
-                            No matching products.
+                      {products.length === 0 ? (
+                        <div className="flex min-h-[170px] flex-col items-center justify-center px-8 py-8 text-center">
+                          
+                          <div className="text-sm font-semibold text-slate-800">
+                            Add your product or service
                           </div>
+                          <p className="mt-1 max-w-sm text-sm text-slate-500">
+                            Save services or products for reuse and faster invoice entry.
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-primary mt-4 px-3 py-1.5 text-sm"
+                            onClick={() => {
+                              setProductPickerId(null);
+                              setProductSearch("");
+                              onAddProduct?.();
+                            }}
+                          >
+                            + Add new product
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="border-b border-slate-100 p-2">
+                            <input
+                              className={inputCls}
+                              autoFocus
+                              placeholder="Search products by name, description, or HSN/SAC"
+                              value={productSearch}
+                              onChange={(e) => setProductSearch(e.target.value)}
+                            />
+                          </div>
+                          <div className="max-h-56 overflow-y-auto">
+                            {matchingProducts.map((product) => (
+                              <button
+                                key={product.id}
+                                type="button"
+                                className="grid w-full grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm transition hover:bg-[#F5F3EE]"
+                                onClick={() => applyProduct(i.id, product.id)}
+                              >
+                                <span className="min-w-0">
+                                  <span className="block font-semibold text-slate-800">{product.name}</span>
+                                  <span className="block truncate text-xs text-slate-500">
+                                    {product.description || "No description"}{product.hsn_sac ? ` - HSN/SAC ${product.hsn_sac}` : ""}
+                                  </span>
+                                </span>
+                                <span className="whitespace-nowrap text-slate-700">
+                                  INR {formatMoney(product.amount)}
+                                </span>
+                              </button>
+                            ))}
+                            {matchingProducts.length === 0 && (
+                              <div className="px-3 py-4 text-sm text-slate-500">
+                                No matching products.
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      <div className={`flex items-center gap-3 p-2 ${products.length > 0 ? "justify-between" : "justify-end"}`}>
+                        {products.length > 0 ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary px-3 py-1.5 text-[13px]"
+                            onClick={() => {
+                              setProductPickerId(null);
+                              setProductSearch("");
+                              onAddProduct?.();
+                            }}
+                          >
+                            + Add new product
+                          </button>
+                        ) : (
+                          <span />
                         )}
-                      </div>
-                      <div className="flex justify-end p-2">
                         <button
                           type="button"
-                          className="btn btn-outline px-3 py-1.5 text-sm"
+                          className="rounded border border-slate-300 px-3 py-1.5 text-[13px] font-semibold text-slate-600 transition hover:bg-slate-50"
                           onClick={() => {
                             setProductPickerId(null);
                             setProductSearch("");
