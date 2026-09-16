@@ -33,6 +33,8 @@ export default function InvoiceEditor({
   const [referenceRateError, setReferenceRateError] = useState("");
   const [reverse, setReverse] = useState(false);
   const [items, setItems] = useState([blank()]);
+  const [productPickerId, setProductPickerId] = useState(null);
+  const [productSearch, setProductSearch] = useState("");
   const [message, setMessage] = useState({});
   useEffect(() => {
     if (invoice) {
@@ -90,7 +92,17 @@ export default function InvoiceEditor({
           }
         : item
     )));
+    setProductPickerId(null);
+    setProductSearch("");
   };
+  const matchingProducts = products.filter((product) => {
+    const term = productSearch.trim().toLowerCase();
+    if (!term) return true;
+    return [product.name, product.description, product.hsn_sac]
+      .join(" ")
+      .toLowerCase()
+      .includes(term);
+  });
   const subtotal = items.reduce(
     (s, i) => s + Number(i.qty || 0) * Number(i.rate || 0),
     0,
@@ -131,7 +143,7 @@ export default function InvoiceEditor({
       />
       <div className="p-8">
         <Message {...message} />
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-[400px_minmax(0,1fr)] gap-8">
           <div className="flex flex-col gap-3">
             <Field label="Customer">
               <select
@@ -250,67 +262,129 @@ export default function InvoiceEditor({
               </>
             )}
           </div>
-          <div>
+          <div className="min-w-0">
             {items.map((i) => (
-              <div className="card p-3 grid grid-cols-6 gap-2 mb-3" key={i.id}>
-                <Field label="Product">
-                  <select
-                    className={inputCls}
-                    defaultValue=""
-                    onChange={(e) => {
-                      applyProduct(i.id, e.target.value);
-                      e.target.value = "";
-                    }}
-                  >
-                    <option value="">Manual entry</option>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Item Name">
-                  <input
-                    className={inputCls}
-                    value={i.item_name}
-                    onChange={(e) => update(i.id, "item_name", e.target.value)}
-                  />
-                </Field>
-                <Field label="Description">
-                  <textarea
-                    className={inputCls}
-                    value={i.item_description}
-                    onChange={(e) =>
-                      update(i.id, "item_description", e.target.value)
-                    }
-                  />
-                </Field>
-                <Field label="HSN/SAC">
-                  <input
-                    className={inputCls}
-                    value={i.hsn_sac}
-                    onChange={(e) => update(i.id, "hsn_sac", e.target.value)}
-                  />
-                </Field>
-                <Field label="Qty">
-                  <input
-                    type="number"
-                    disabled={frozenExport}
-                    className={inputCls}
-                    value={i.qty}
-                    onChange={(e) => update(i.id, "qty", e.target.value)}
-                  />
-                </Field>
-                <Field label="Rate">
-                  <input
-                    type="number"
-                    disabled={frozenExport}
-                    className={inputCls}
-                    value={i.rate}
-                    onChange={(e) => update(i.id, "rate", e.target.value)}
-                  />
-                </Field>
+              <div className="card mb-3 p-4 shadow-sm" key={i.id}>
+                <div className="grid grid-cols-[40px_minmax(120px,1fr)_minmax(150px,1.2fr)_90px_70px_90px] gap-3 items-start">
+                  <div className="pt-[22px]">
+                    <button
+                      type="button"
+                      className="btn btn-primary flex h-10 w-10 items-center justify-center shadow-sm transition hover:bg-[#26394A] active:translate-y-px"
+                      title="Select product"
+                      aria-label="Select product"
+                      onClick={() =>
+                        setProductPickerId(productPickerId === i.id ? null : i.id)
+                      }
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="11" cy="11" r="7" />
+                        <path d="m20 20-3.5-3.5" />
+                      </svg>
+                    </button>
+                  </div>
+                  <Field label="Item Name">
+                    <input
+                      className="w-full rounded border bg-white px-3 py-2 text-sm shadow-inner min-w-0 h-10"
+                      value={i.item_name}
+                      onChange={(e) => update(i.id, "item_name", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Description">
+                    <textarea
+                      className="w-full rounded border bg-white px-3 py-2 text-sm shadow-inner min-w-0 h-16 resize-none"
+                      value={i.item_description}
+                      onChange={(e) =>
+                        update(i.id, "item_description", e.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="HSN/SAC">
+                    <input
+                      className="w-full rounded border bg-white px-3 py-2 text-sm shadow-inner min-w-0 h-10"
+                      value={i.hsn_sac}
+                      onChange={(e) => update(i.id, "hsn_sac", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Qty">
+                    <input
+                      type="number"
+                      disabled={frozenExport}
+                      className="w-full rounded border bg-white px-3 py-2 text-sm shadow-inner min-w-0 h-10"
+                      value={i.qty}
+                      onChange={(e) => update(i.id, "qty", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Rate">
+                    <input
+                      type="number"
+                      disabled={frozenExport}
+                      className="w-full rounded border bg-white px-3 py-2 text-sm shadow-inner min-w-0 h-10"
+                      value={i.rate}
+                      onChange={(e) => update(i.id, "rate", e.target.value)}
+                    />
+                  </Field>
+                </div>
+                {productPickerId === i.id && (
+                  <div className="mt-3 ml-[52px] w-full max-w-xl border-t pt-3">
+                    <div className="rounded border border-slate-200 bg-white shadow-sm">
+                      <div className="border-b border-slate-100 p-2">
+                        <input
+                          className={inputCls}
+                          autoFocus
+                          placeholder="Search products by name, description, or HSN/SAC"
+                          value={productSearch}
+                          onChange={(e) => setProductSearch(e.target.value)}
+                        />
+                      </div>
+                      <div className="max-h-56 overflow-y-auto">
+                        {matchingProducts.map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            className="grid w-full grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm transition hover:bg-[#F5F3EE]"
+                            onClick={() => applyProduct(i.id, product.id)}
+                          >
+                            <span className="min-w-0">
+                              <span className="block font-semibold text-slate-800">{product.name}</span>
+                              <span className="block truncate text-xs text-slate-500">
+                                {product.description || "No description"}{product.hsn_sac ? ` - HSN/SAC ${product.hsn_sac}` : ""}
+                              </span>
+                            </span>
+                            <span className="whitespace-nowrap text-slate-700">
+                              INR {formatMoney(product.amount)}
+                            </span>
+                          </button>
+                        ))}
+                        {matchingProducts.length === 0 && (
+                          <div className="px-3 py-4 text-sm text-slate-500">
+                            No matching products.
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex justify-end p-2">
+                        <button
+                          type="button"
+                          className="btn btn-outline px-3 py-1.5 text-sm"
+                          onClick={() => {
+                            setProductPickerId(null);
+                            setProductSearch("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             <button
