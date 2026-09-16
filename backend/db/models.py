@@ -50,6 +50,7 @@ class Tenant(Base):
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     customers = relationship("Customer", back_populates="tenant", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="tenant", cascade="all, delete-orphan")
+    products = relationship("Product", back_populates="tenant", cascade="all, delete-orphan")
     lut_certificates = relationship("LutCertificate", back_populates="tenant", cascade="all, delete-orphan")
     billing_settings = relationship("BillingSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
 
@@ -213,6 +214,24 @@ class InvoiceItem(Base):
     amount = Column(Numeric(14, 2), default=0)
 
     invoice = relationship("Invoice", back_populates="items")
+
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_product_tenant_name"),)
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    tenant_id = Column(String(12), ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String(500), nullable=False)
+    description = Column(String(2000), default="")
+    hsn_sac = Column(String(50), default="")
+    amount = Column(Numeric(14, 2), default=0, nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tenant = relationship("Tenant", back_populates="products")
 
 
 class Receipt(Base):

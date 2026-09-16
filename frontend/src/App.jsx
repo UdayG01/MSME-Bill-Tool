@@ -10,6 +10,7 @@ import InvoiceEditorScreen from "./components/InvoiceEditor";
 import InvoiceRegisterScreen from "./components/InvoiceRegister";
 import LutCertificatesScreen from "./components/LutCertificates";
 import NumberingSetupScreen from "./components/NumberingSetup";
+import ProductsScreen from "./components/Products";
 import ReceiptsScreen from "./components/Receipts";
 import ReceivablesScreen from "./components/Receivables";
 import SalesReportsScreen from "./components/SalesReports";
@@ -22,6 +23,7 @@ const NAV = [
   ["numbering", "Invoice Numbering"],
   ["lut", "LUT Certificates"],
   ["customers", "Customers"],
+  ["products", "Products"],
   ["invoice", "New Invoice"],
   ["invoices", "Invoice Register"],
   ["receipts", "Receipt Entry"],
@@ -35,6 +37,7 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [company, setCompany] = useState(null);
   const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [creditNotes, setCreditNotes] = useState([]);
@@ -54,18 +57,21 @@ export default function App() {
       const [
         companyData,
         customersData,
+        productsData,
         invoicesData,
         receiptsData,
         creditNotesData,
       ] = await Promise.all([
         api.getCompany(),
         api.listCustomers(true),
+        api.listProducts(true),
         api.listInvoices(),
         api.listReceipts(),
         api.listCreditNotes(),
       ]);
       setCompany(companyData);
       setCustomers(customersData);
+      setProducts(productsData);
       setInvoices(invoicesData);
       setReceipts(receiptsData);
       setCreditNotes(creditNotesData);
@@ -201,9 +207,13 @@ export default function App() {
         {tab === "customers" && (
           <CustomersScreen customers={customers} onChanged={loadAll} />
         )}
+        {tab === "products" && (
+          <ProductsScreen products={products} onChanged={loadAll} />
+        )}
         {tab === "invoice" && (
           <InvoiceEditorScreen
-            customers={customers.filter((customer) => !customer.is_archived)}
+            customers={customers}
+            products={products.filter((product) => !product.is_archived)}
             invoice={editingInvoice}
             onSaved={loadAll}
             onDone={() => {

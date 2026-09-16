@@ -106,6 +106,13 @@ export const api = {
   archiveCustomer: (id) => request(`/customers/${id}/archive`, { method: "POST" }),
   restoreCustomer: (id) => request(`/customers/${id}/restore`, { method: "POST" }),
 
+  listProducts: (includeArchived = true) => request(`/products?include_archived=${includeArchived}`),
+  createProduct: (data) => request("/products", { method: "POST", body: JSON.stringify(data) }),
+  updateProduct: (id, data) => request(`/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  archiveProduct: (id) => request(`/products/${id}/archive`, { method: "POST" }),
+  restoreProduct: (id) => request(`/products/${id}/restore`, { method: "POST" }),
+  deleteProduct: (id) => request(`/products/${id}`, { method: "DELETE" }),
+
   listInvoices: () => request("/invoices"),
   createInvoice: (data) => request("/invoices", { method: "POST", body: JSON.stringify(data) }),
   updateInvoice: (id, data) => request(`/invoices/${id}`, { method: "PUT", body: JSON.stringify(data) }),

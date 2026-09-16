@@ -17,6 +17,7 @@ const RATE_RANGES = {
 };
 export default function InvoiceEditor({
   customers,
+  products = [],
   invoice,
   onSaved,
   onDone,
@@ -47,7 +48,9 @@ export default function InvoiceEditor({
     }
   }, [invoice]);
   const customer = customers.find((c) => c.id === customerId);
+  const customerOptions = customers.filter((c) => !c.is_archived || c.id === customerId);
   const isExport = customer?.is_foreign;
+  const isIssued = invoice?.status === "issued";
   const frozenExport = Boolean(invoice?.is_export);
   const expectedRate = RATE_RANGES[currency];
   const unusualRate = expectedRate && Number(rate) > 0 && (Number(rate) < expectedRate[0] || Number(rate) > expectedRate[1]);
@@ -73,6 +76,21 @@ export default function InvoiceEditor({
   }, [isExport, frozenExport, currency]);
   const update = (id, key, value) =>
     setItems(items.map((i) => (i.id === id ? { ...i, [key]: value } : i)));
+  const applyProduct = (itemId, productId) => {
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    setItems(items.map((item) => (
+      item.id === itemId
+        ? {
+            ...item,
+            item_name: product.name,
+            item_description: product.description,
+            hsn_sac: product.hsn_sac,
+            rate: product.amount,
+          }
+        : item
+    )));
+  };
   const subtotal = items.reduce(
     (s, i) => s + Number(i.qty || 0) * Number(i.rate || 0),
     0,
@@ -108,8 +126,8 @@ export default function InvoiceEditor({
   return (
     <div>
       <SectionHeader
-        title={invoice ? "Edit Draft Invoice" : "New Invoice"}
-        subtitle="Drafts are editable until issued."
+        title={invoice ? `Edit ${isIssued ? "Issued" : "Draft"} Invoice` : "New Invoice"}
+        subtitle={isIssued ? "Issued invoices can be edited until receipts or credit notes are applied." : "Drafts are editable until issued."}
       />
       <div className="p-8">
         <Message {...message} />
@@ -123,9 +141,9 @@ export default function InvoiceEditor({
                 onChange={(e) => setCustomerId(e.target.value)}
               >
                 <option value="">Select customer</option>
-                {customers.map((c) => (
+                {customerOptions.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}
+                    {c.name}{c.is_archived ? " (archived)" : ""}
                   </option>
                 ))}
               </select>
@@ -234,7 +252,24 @@ export default function InvoiceEditor({
           </div>
           <div>
             {items.map((i) => (
-              <div className="card p-3 grid grid-cols-5 gap-2 mb-3" key={i.id}>
+              <div className="card p-3 grid grid-cols-6 gap-2 mb-3" key={i.id}>
+                <Field label="Product">
+                  <select
+                    className={inputCls}
+                    defaultValue=""
+                    onChange={(e) => {
+                      applyProduct(i.id, e.target.value);
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="">Manual entry</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Item Name">
                   <input
                     className={inputCls}
@@ -291,14 +326,16 @@ export default function InvoiceEditor({
               className="btn btn-outline px-4 py-2 text-sm mt-4"
               onClick={() => save(false)}
             >
-              Save Draft
+              {isIssued ? "Save Changes" : "Save Draft"}
             </button>
-            <button
-              className="btn btn-primary px-4 py-2 text-sm mt-4 ml-3"
-              onClick={() => save(true)}
-            >
-              Save & Issue
-            </button>
+            {!isIssued && (
+              <button
+                className="btn btn-primary px-4 py-2 text-sm mt-4 ml-3"
+                onClick={() => save(true)}
+              >
+                Save & Issue
+              </button>
+            )}
           </div>
         </div>
       </div>

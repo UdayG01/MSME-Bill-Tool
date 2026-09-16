@@ -124,6 +124,28 @@ class CustomerOut(CustomerIn):
     archived_at: Optional[datetime]
 
 
+class ProductIn(BaseModel):
+    name: str = Field(min_length=1, max_length=500)
+    description: str = Field(default="", max_length=2000)
+    hsn_sac: str = Field(default="", max_length=50)
+    amount: Decimal = Field(default=Decimal("0"), ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Product name is required")
+        return value
+
+
+class ProductOut(ProductIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    is_archived: bool
+    archived_at: Optional[datetime]
+
+
 class InvoiceItemIn(BaseModel):
     description: str = Field(default="", max_length=2000)
     item_name: str = Field(default="", max_length=500)

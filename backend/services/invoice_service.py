@@ -65,6 +65,32 @@ def _active_customer(db: Session, tenant_id: str, customer_id: str) -> models.Cu
     return customer
 
 
+def _editable_customer(db: Session, tenant_id: str, customer_id: str, current_customer_id: str) -> models.Customer:
+    customer = db.query(models.Customer).filter_by(id=customer_id, tenant_id=tenant_id).first()
+    if not customer:
+        raise ServiceError(404, "Customer not found")
+    if customer.is_archived and customer.id != current_customer_id:
+        raise ServiceError(404, "Active customer not found")
+    return customer
+
+
+def _has_active_applications(db: Session, invoice: models.Invoice) -> bool:
+    return active_receipts_total(db, invoice.id) > 0 or active_credit_total(db, invoice.id) > 0
+
+
+def _snapshot_issued_metadata(db: Session, invoice: models.Invoice, tenant: models.Tenant, customer: models.Customer) -> None:
+    settings = billing_settings_service.get_settings(db, invoice.tenant_id)
+    for target, source in COMPANY_SNAPSHOT_FIELDS.items():
+        setattr(invoice, target, getattr(tenant, source) or "")
+    invoice.terms_notes_snapshot = settings.terms_notes or ""
+    invoice.tagline_snapshot = settings.tagline or ""
+    invoice.logo_asset_id_snapshot = tenant.logo_asset_id
+    invoice.signature_asset_id_snapshot = tenant.signature_asset_id
+    for field in CUSTOMER_SNAPSHOT_FIELDS:
+        target = f"customer_{field}_snapshot"
+        setattr(invoice, target, getattr(customer, field) or "")
+
+
 def _apply_draft(db: Session, invoice: models.Invoice, payload: schemas.InvoiceCreate, customer: models.Customer) -> None:
     tenant = db.get(models.Tenant, invoice.tenant_id)
     settings = billing_settings_service.get_settings(db, invoice.tenant_id)
@@ -119,11 +145,15 @@ def create_draft(db: Session, tenant_id: str, payload: schemas.InvoiceCreate) ->
 
 def update_draft(db: Session, tenant_id: str, invoice_id: str, payload: schemas.InvoiceCreate) -> models.Invoice:
     invoice = get_invoice(db, tenant_id, invoice_id)
-    if invoice.status != "draft":
-        raise ServiceError(409, "Only draft invoices can be edited")
-    customer = _active_customer(db, tenant_id, payload.customer_id)
+    if invoice.status not in {"draft", "issued"}:
+        raise ServiceError(409, "Only draft or issued invoices can be edited")
+    if invoice.status == "issued" and _has_active_applications(db, invoice):
+        raise ServiceError(409, "Void active receipts and credit notes before editing this invoice")
+    if invoice.status == "issued" and invoice.fy_label and fy_label_for(payload.invoice_date) != invoice.fy_label:
+        raise ServiceError(409, "Issued invoice date cannot move to a different financial year")
+    customer = _editable_customer(db, tenant_id, payload.customer_id, invoice.customer_id)
     if customer.is_foreign != invoice.is_export:
-        raise ServiceError(409, "Domestic/export classification is frozen at draft creation; create a new draft instead")
+        raise ServiceError(409, "Domestic/export classification is frozen for this invoice")
     if invoice.is_export:
         proposed_subtotal = money(sum(
             (Decimal(item.qty) * Decimal(item.rate) for item in payload.items),
@@ -141,6 +171,8 @@ def update_draft(db: Session, tenant_id: str, invoice_id: str, payload: schemas.
                 "Export currency, exchange rate, and total are frozen at draft creation; create a new draft to change them",
             )
     _apply_draft(db, invoice, payload, customer)
+    if invoice.status == "issued":
+        _snapshot_issued_metadata(db, invoice, db.get(models.Tenant, tenant_id), customer)
     db.commit()
     db.refresh(invoice)
     return invoice
@@ -148,8 +180,10 @@ def update_draft(db: Session, tenant_id: str, invoice_id: str, payload: schemas.
 
 def delete_draft(db: Session, tenant_id: str, invoice_id: str) -> None:
     invoice = get_invoice(db, tenant_id, invoice_id)
-    if invoice.status != "draft":
-        raise ServiceError(409, "Only draft invoices can be deleted")
+    if invoice.status not in {"draft", "issued"}:
+        raise ServiceError(409, "Only draft or issued invoices can be deleted")
+    if invoice.status == "issued" and _has_active_applications(db, invoice):
+        raise ServiceError(409, "Void active receipts and credit notes before deleting this invoice")
     db.delete(invoice)
     db.commit()
 
@@ -162,7 +196,6 @@ def issue_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoic
         raise ServiceError(400, "Invoice must have at least one line item")
     tenant = db.get(models.Tenant, tenant_id)
     customer = invoice.customer
-    settings = billing_settings_service.get_settings(db, tenant_id)
     export_lut = None
     if invoice.is_export:
         export_lut = lut_service.valid_active_lut(db, tenant_id, invoice.invoice_date)
@@ -189,15 +222,7 @@ def issue_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoic
                 invoice.lut_valid_from_snapshot = export_lut.valid_from
                 invoice.lut_valid_to_snapshot = export_lut.valid_to
                 invoice.lut_financial_year_snapshot = export_lut.financial_year
-            for target, source in COMPANY_SNAPSHOT_FIELDS.items():
-                setattr(invoice, target, getattr(tenant, source) or "")
-            invoice.terms_notes_snapshot = settings.terms_notes or ""
-            invoice.tagline_snapshot = settings.tagline or ""
-            invoice.logo_asset_id_snapshot = tenant.logo_asset_id
-            invoice.signature_asset_id_snapshot = tenant.signature_asset_id
-            for field in CUSTOMER_SNAPSHOT_FIELDS:
-                target = f"customer_{field}_snapshot"
-                setattr(invoice, target, getattr(customer, field) or "")
+            _snapshot_issued_metadata(db, invoice, tenant, customer)
             db.commit()
             db.refresh(invoice)
             return invoice

@@ -102,7 +102,9 @@ def test_invoice_lifecycle_pdf_and_customer_archival(client):
     assert issued["status"] == "issued"
     assert issued["invoice_no"].startswith("ACME/")
     assert issued["customer_area_snapshot"] == "South"
-    assert_status(client.put(f"/invoices/{draft['id']}", json=updated_payload), 409)
+    edited = assert_status(client.put(f"/invoices/{draft['id']}", json=updated_payload), 200).json()
+    assert edited["status"] == "issued"
+    assert edited["invoice_no"] == issued["invoice_no"]
 
     pdf = assert_status(client.get(f"/invoices/{draft['id']}/pdf"), 200)
     assert pdf.headers["content-type"] == "application/pdf"
@@ -183,10 +185,57 @@ def test_receipts_credit_notes_reports_and_cancellation_rules(client):
     assert float(area[0]["total"]) == float(product[0]["total"]) == 900
 
     assert_status(client.post(f"/invoices/{invoice['id']}/cancel", json={"reason": "Entered in error"}), 409)
+    assert_status(client.put(f"/invoices/{invoice['id']}", json=invoice_payload(customer["id"], rate=1300)), 409)
+    assert_status(client.delete(f"/invoices/{invoice['id']}"), 409)
     assert_status(client.post(f"/receipts/{receipt['id']}/void", json={"reason": "Wrong bank entry"}), 200)
     assert_status(client.post(f"/credit-notes/{note['id']}/cancel", json={"reason": "Wrong adjustment"}), 200)
     assert_status(client.post(f"/invoices/{invoice['id']}/cancel", json={"reason": "Entered in error"}), 200)
     assert_status(client.post(f"/receipts/{receipt['id']}/restore"), 409)
+
+
+def test_products_catalog_crud_and_invoice_autofill_payload(client):
+    signup(client)
+    product = assert_status(client.post("/products", json={
+        "name": "Monthly compliance retainer",
+        "description": "GST and MSME filing support",
+        "hsn_sac": "9982",
+        "amount": 2500,
+    }), 201).json()
+    assert product["name"] == "Monthly compliance retainer"
+    assert float(product["amount"]) == 2500
+
+    product = assert_status(client.put(f"/products/{product['id']}", json={
+        "name": "Monthly compliance retainer",
+        "description": "GST, MSME, and advisory support",
+        "hsn_sac": "9982",
+        "amount": 3000,
+    }), 200).json()
+    assert product["description"] == "GST, MSME, and advisory support"
+
+    products = assert_status(client.get("/products?include_archived=true"), 200).json()
+    assert [row["id"] for row in products] == [product["id"]]
+
+    customer = assert_status(client.post("/customers", json=customer_payload()), 201).json()
+    invoice = assert_status(client.post("/invoices", json={
+        "customer_id": customer["id"],
+        "invoice_date": str(date.today()),
+        "gst_rate": 18,
+        "items": [{
+            "item_name": product["name"],
+            "item_description": product["description"],
+            "hsn_sac": product["hsn_sac"],
+            "qty": 2,
+            "rate": product["amount"],
+        }],
+    }), 201).json()
+    assert invoice["items"][0]["item_name"] == product["name"]
+    assert invoice["items"][0]["hsn_sac"] == "9982"
+    assert float(invoice["subtotal"]) == 6000
+
+    archived = assert_status(client.post(f"/products/{product['id']}/archive"), 200).json()
+    assert archived["is_archived"] is True
+    assert_status(client.post(f"/products/{product['id']}/restore"), 200)
+    assert_status(client.delete(f"/products/{product['id']}"), 204)
 
 
 def test_tenant_isolation(client):
