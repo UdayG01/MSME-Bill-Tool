@@ -118,7 +118,7 @@ export default function Customers({ customers, onChanged }) {
               />
             </Field>
             {!form.is_foreign && !form.gstin.trim() && (
-              <Field label="State code (required without GSTIN)">
+              <Field label="State code (Required if no GSTIN available)">
                 <input
                   className={inputCls}
                   style={inputStyle}
