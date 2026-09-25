@@ -24,9 +24,9 @@ def calculate_invoice_tax(db: Session, tenant_id: str, tenant: models.Tenant, cu
     if customer.is_foreign:
         return {"rate": Decimal("0"), "gst": Decimal("0"), "cgst": Decimal("0"), "sgst": Decimal("0"), "igst": Decimal("0"), "treatment": "export_lut", "place_code": "", "place_name": ""}
     supplier_code = (tenant.gstin or "")[:2]
-    customer_code = (customer.gstin or "")[:2]
+    customer_code = (customer.gstin or "")[:2] or customer.state_code
     if supplier_code not in GST_STATES or customer_code not in GST_STATES:
-        raise ServiceError(400, "Valid supplier and customer GSTINs are required for GST calculation")
+        raise ServiceError(400, "Valid supplier GSTIN and customer state code are required for GST calculation")
     tax = money(subtotal * Decimal(gst_rate) / Decimal("100"))
     if supplier_code == customer_code:
         cgst = money(tax / 2)

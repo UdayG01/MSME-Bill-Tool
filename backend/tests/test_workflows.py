@@ -1,8 +1,10 @@
 from datetime import date
 from io import BytesIO
 import re
+from types import SimpleNamespace
 
 from PIL import Image as PILImage, ImageDraw
+from services.pdf_service import _customer_tax_detail
 
 
 def assert_status(response, expected):
@@ -50,6 +52,66 @@ def test_state_codes_are_validated_before_a_database_write(client):
     response = client.put("/company", json={"state_code": "Haryana"})
     assert response.status_code == 422
     assert "two-digit code" in response.text
+
+
+def test_domestic_customer_without_gstin_can_be_invoiced(client):
+    signup(client)
+    payload = {**customer_payload(), "gstin": ""}
+    assert_status(client.post("/customers", json={**payload, "state_code": ""}), 422)
+    customer = assert_status(client.post("/customers", json=payload), 201).json()
+    assert customer["gstin"] == ""
+    assert customer["state_code"] == "29"
+
+    draft = assert_status(client.post("/invoices", json=invoice_payload(customer["id"])), 201).json()
+    assert draft["tax_treatment"] == "cgst_sgst"
+    assert draft["place_of_supply_code"] == "29"
+    assert float(draft["total"]) == 1180
+    invoice = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
+    assert invoice["customer_gstin_snapshot"] == ""
+    assert assert_status(client.get(f"/invoices/{draft['id']}/pdf"), 200).content.startswith(b"%PDF")
+
+    note = assert_status(client.post(f"/invoices/{draft['id']}/credit-notes", json={
+        "date": str(date.today()), "reason": "Price adjustment",
+        "items": [{"description": "Adjustment", "category": "Services", "qty": 1, "rate": 100}],
+    }), 201).json()
+    assert assert_status(client.get(f"/credit-notes/{note['id']}/pdf"), 200).content.startswith(b"%PDF")
+
+    interstate = assert_status(client.post("/customers", json={
+        **payload, "name": "Unregistered Delhi", "state_code": "07",
+    }), 201).json()
+    interstate_invoice = assert_status(client.post("/invoices", json=invoice_payload(interstate["id"])), 201).json()
+    assert interstate_invoice["tax_treatment"] == "igst"
+    assert interstate_invoice["place_of_supply_code"] == "07"
+
+
+def test_pdf_customer_detail_uses_issued_gstin_snapshot():
+    invoice = SimpleNamespace(
+        status="issued", is_export=False, customer_gstin_snapshot="",
+        customer_country_snapshot="India", place_of_supply_code="29",
+        customer=SimpleNamespace(gstin="29AAAAA0000A1Z5", state_code="29", country="India"),
+    )
+    assert _customer_tax_detail(invoice) == ("State code", "29")
+    invoice.customer_gstin_snapshot = "29BBBBB0000B1Z5"
+    assert _customer_tax_detail(invoice) == ("GSTIN", "29BBBBB0000B1Z5")
+    invoice.status = "cancelled"
+    invoice.customer_gstin_snapshot = ""
+    assert _customer_tax_detail(invoice) == ("State code", "29")
+
+
+def test_existing_registered_customer_keeps_gstin_and_tax_treatment(client):
+    signup(client)
+    payload = customer_payload()
+    customer = assert_status(client.post("/customers", json=payload), 201).json()
+    updated = assert_status(client.put(f"/customers/{customer['id']}", json=payload), 200).json()
+    assert updated["gstin"] == payload["gstin"]
+    assert updated["state_code"] == "29"
+
+    draft = assert_status(client.post("/invoices", json=invoice_payload(customer["id"])), 201).json()
+    assert draft["tax_treatment"] == "cgst_sgst"
+    assert float(draft["total"]) == 1180
+    issued = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
+    assert issued["customer_gstin_snapshot"] == payload["gstin"]
+    assert assert_status(client.get(f"/invoices/{draft['id']}/pdf"), 200).content.startswith(b"%PDF")
 
 
 def test_authenticated_live_exchange_rate_endpoint(client, monkeypatch):

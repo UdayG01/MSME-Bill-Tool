@@ -104,7 +104,7 @@ export default function Customers({ customers, onChanged }) {
               />{" "}
               Foreign customer
             </label>
-            <Field label={form.is_foreign ? "Country" : "GSTIN"}>
+            <Field label={form.is_foreign ? "Country" : "GSTIN (optional)"}>
               <input
                 className={inputCls}
                 value={form.is_foreign ? form.country : form.gstin}
@@ -117,6 +117,18 @@ export default function Customers({ customers, onChanged }) {
                 }
               />
             </Field>
+            {!form.is_foreign && !form.gstin.trim() && (
+              <Field label="State code (required without GSTIN)">
+                <input
+                  className={inputCls}
+                  style={inputStyle}
+                  inputMode="numeric"
+                  maxLength={2}
+                  value={form.state_code}
+                  onChange={(e) => setForm({ ...form, state_code: e.target.value })}
+                />
+              </Field>
+            )}
             <Field label="Area">
               <input
                 className={inputCls}

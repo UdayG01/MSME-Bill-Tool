@@ -111,9 +111,13 @@ class CustomerIn(BaseModel):
                 raise ValueError("Foreign customers require a non-India country")
             self.gstin, self.state_code = "", ""
         else:
-            if not re.fullmatch(r"[0-9]{2}[A-Z0-9]{13}", self.gstin):
-                raise ValueError("Domestic customers require a valid 15-character GSTIN")
-            self.country, self.state_code = "India", self.gstin[:2]
+            if self.gstin:
+                if not re.fullmatch(r"[0-9]{2}[A-Z0-9]{13}", self.gstin):
+                    raise ValueError("GSTIN must be a valid 15-character value when provided")
+                self.state_code = self.gstin[:2]
+            elif not self.state_code:
+                raise ValueError("Domestic customers without a GSTIN require a state code")
+            self.country = "India"
         return self
 
 

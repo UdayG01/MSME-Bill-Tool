@@ -117,6 +117,15 @@ def _metadata_table(rows):
     return table
 
 
+def _customer_tax_detail(invoice):
+    gstin = invoice.customer_gstin_snapshot if invoice.status in ("issued", "cancelled") or getattr(invoice, "is_preview", False) else invoice.customer.gstin
+    if gstin:
+        return "GSTIN", gstin
+    if invoice.is_export:
+        return "Country", invoice.customer_country_snapshot or invoice.customer.country
+    return "State code", invoice.place_of_supply_code or invoice.customer.state_code
+
+
 def _items_table(items, currency="INR", styles=None):
     rows = [["#", "Item / description", "HSN/SAC", "Qty", "Rate", "Amount"]]
     for index, item in enumerate(items, start=1):
@@ -221,6 +230,7 @@ def build_invoice_pdf(invoice: models.Invoice) -> bytes:
     place_of_supply = "-"
     if invoice.place_of_supply_name and invoice.place_of_supply_code:
         place_of_supply = f"{invoice.place_of_supply_name} (State Code: {invoice.place_of_supply_code})"
+    customer_tax_label, customer_tax_value = _customer_tax_detail(invoice)
     story = [
         header,
         Spacer(1, 6 * mm),
@@ -230,7 +240,7 @@ def build_invoice_pdf(invoice: models.Invoice) -> bytes:
             ["Order number", invoice.order_no or "-", "Order date", str(invoice.order_date or "-")],
             *([["LUT ARN", invoice.lut_no_snapshot or "-", "LUT Financial Year", invoice.lut_financial_year_snapshot or "-"]] if invoice.is_export else []),
             ["Customer", invoice.customer_name_snapshot or invoice.customer.name, "Country", invoice.customer_country_snapshot or invoice.customer.country],
-            ["Bill to", invoice.customer_address_snapshot or invoice.customer.address or "-", "GSTIN", invoice.customer_gstin_snapshot or invoice.customer.gstin or "-"],
+            ["Bill to", invoice.customer_address_snapshot or invoice.customer.address or "-", customer_tax_label, customer_tax_value or "-"],
             ["Place of supply", place_of_supply, "Reverse charge", "Yes" if invoice.reverse_charge else "No"],
         ]),
         Spacer(1, 6 * mm),
@@ -353,6 +363,7 @@ def build_company_preview_pdf(tenant: models.Tenant, billing_settings, values: d
 
 def build_credit_note_pdf(note: models.CreditNote) -> bytes:
     invoice = note.invoice
+    customer_tax_label, customer_tax_value = _customer_tax_detail(invoice)
     buffer, doc = _document(note.credit_note_no)
     styles = getSampleStyleSheet()
     story = [
@@ -363,7 +374,7 @@ def build_credit_note_pdf(note: models.CreditNote) -> bytes:
         _metadata_table([
             ["Credit note", note.credit_note_no, "Date", str(note.date)],
             ["Against invoice", invoice.invoice_no or "-", "Invoice date", str(invoice.invoice_date)],
-            ["Customer", invoice.customer_name_snapshot or invoice.customer.name, "GSTIN", invoice.customer_gstin_snapshot or "-"],
+            ["Customer", invoice.customer_name_snapshot or invoice.customer.name, customer_tax_label, customer_tax_value or "-"],
             ["Reason", note.reason, "Status", note.status.upper()],
         ]),
         Spacer(1, 6 * mm),
