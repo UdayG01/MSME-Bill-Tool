@@ -426,8 +426,8 @@ def test_oop_is_non_taxable_rounded_and_reported(client):
     register = assert_status(client.get("/reports/sales-register"), 200).json()
     assert register == [{
         "invoice_no": issued["invoice_no"], "invoice_date": str(date.today()),
-        "customer_name": "Northwind", "taxable_value": 1000, "gst": 180,
-        "oop_amount": 250.4, "invoice_total": 1430,
+        "customer_name": "Northwind", "taxable_value": "1000.00", "gst": "180.00",
+        "oop_amount": "250.40", "invoice_total": "1430.00",
         "place_of_supply_code": "29", "place_of_supply_name": "Karnataka",
     }]
 
