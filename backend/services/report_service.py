@@ -88,3 +88,38 @@ def sales_product_wise(db: Session, tenant_id: str):
                 for item in note.items:
                     totals[item.category or "Unspecified"] -= Decimal(item.amount)
     return [schemas.SalesBreakdownRow(key=key, total=money(total)) for key, total in sorted(totals.items(), key=lambda row: row[1], reverse=True)]
+
+
+def sales_register(db: Session, tenant_id: str, from_date: date | None = None, to_date: date | None = None):
+    query = db.query(models.Invoice).filter_by(tenant_id=tenant_id, status="issued")
+    if from_date:
+        query = query.filter(models.Invoice.invoice_date >= from_date)
+    if to_date:
+        query = query.filter(models.Invoice.invoice_date <= to_date)
+    rows = []
+    for invoice in query.order_by(models.Invoice.invoice_date, models.Invoice.invoice_no).all():
+        rows.append(schemas.SalesRegisterRow(
+            invoice_no=invoice.invoice_no or "",
+            invoice_date=invoice.invoice_date,
+            customer_name=invoice.customer_name_snapshot or invoice.customer.name,
+            taxable_value=money(invoice.subtotal), gst=money(invoice.gst_amount),
+            oop_amount=money(invoice.oop_amount), invoice_total=money(invoice.total),
+            place_of_supply_code=invoice.place_of_supply_code or "",
+            place_of_supply_name=invoice.place_of_supply_name or "",
+        ))
+    return rows
+
+
+def gstr1_invoices(db: Session, tenant_id: str, from_date: date | None = None, to_date: date | None = None):
+    query = db.query(models.Invoice).filter_by(tenant_id=tenant_id, status="issued")
+    if from_date:
+        query = query.filter(models.Invoice.invoice_date >= from_date)
+    if to_date:
+        query = query.filter(models.Invoice.invoice_date <= to_date)
+    return [schemas.Gstr1InvoiceRow(
+        invoice_no=invoice.invoice_no or "", invoice_date=invoice.invoice_date,
+        recipient_gstin=invoice.customer_gstin_snapshot or invoice.customer.gstin or "",
+        place_of_supply_code=invoice.place_of_supply_code or "",
+        taxable_value=money(invoice.subtotal), gst_amount=money(invoice.gst_amount),
+        invoice_value=money(invoice.total),
+    ) for invoice in query.order_by(models.Invoice.invoice_date, models.Invoice.invoice_no).all()]

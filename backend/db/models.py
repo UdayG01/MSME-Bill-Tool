@@ -139,6 +139,13 @@ class Invoice(Base):
     subtotal = Column(Numeric(14, 2), default=0)
     gst_amount = Column(Numeric(14, 2), default=0)
     total = Column(Numeric(14, 2), default=0)
+    # Header-level reimbursement. It intentionally is not an InvoiceItem and
+    # therefore never participates in taxable-value or GST calculations.
+    oop_description = Column(String(200), nullable=True)
+    oop_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    oop_amount_inr = Column(Numeric(14, 2), nullable=False, default=0)
+    round_off = Column(Numeric(14, 2), nullable=False, default=0)
+    round_off_inr = Column(Numeric(14, 2), nullable=False, default=0)
 
     is_export = Column(Boolean, default=False)
     lut_no_snapshot = Column(String(100), default="")
@@ -148,6 +155,8 @@ class Invoice(Base):
     tax_treatment = Column(String(50), default="")
     place_of_supply_code = Column(String(20), default="")
     place_of_supply_name = Column(String(255), default="")
+    pos_overridden = Column(Boolean, nullable=False, default=False)
+    pos_mismatch = Column(Boolean, nullable=False, default=False)
     cgst_amount = Column(Numeric(14, 2), default=0)
     sgst_amount = Column(Numeric(14, 2), default=0)
     igst_amount = Column(Numeric(14, 2), default=0)
@@ -334,6 +343,16 @@ class TaxJurisdiction(Base):
     code = Column(String(20), nullable=False)
     name = Column(String(255), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+
+
+class GstStateMaster(Base):
+    """System GST state/UT catalogue; retained tax_jurisdictions stay tenant-owned."""
+    __tablename__ = "gst_state_master"
+
+    code = Column(String(2), primary_key=True)
+    name = Column(String(60), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    is_ut = Column(Boolean, nullable=False, default=False)
 
 
 class LutCertificate(Base):

@@ -8,6 +8,12 @@ from services.errors import ServiceError
 router = APIRouter(prefix="/tax-jurisdictions", tags=["tax"])
 
 
+@router.get("/gst-states", response_model=list[schemas.GstStateOut])
+def list_gst_states(session=Depends(get_current_session), db: Session = Depends(get_db)):
+    # Session dependency keeps the catalogue private to authenticated users.
+    return db.query(models.GstStateMaster).order_by(models.GstStateMaster.code).all()
+
+
 @router.get("", response_model=list[schemas.TaxJurisdictionOut])
 def list_jurisdictions(session=Depends(get_current_session), db: Session = Depends(get_db)):
     return db.query(models.TaxJurisdiction).filter_by(tenant_id=session["tenant_id"]).order_by(models.TaxJurisdiction.code).all()

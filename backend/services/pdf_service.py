@@ -151,7 +151,7 @@ def _items_table(items, currency="INR", styles=None):
     return table
 
 
-def _totals_table(subtotal, gst_rate, gst_amount, total, total_label="Total", currency="INR", treatment="", cgst=0, sgst=0, igst=0):
+def _totals_table(subtotal, gst_rate, gst_amount, total, total_label="Invoice Total", currency="INR", treatment="", cgst=0, sgst=0, igst=0, oop_amount=0, oop_description=None, round_off=0):
     # Use the shared printable width; the blank first column keeps the monetary
     # summary visually right-aligned while preserving the section edge.
     rows = [["", "Subtotal", _fmt(subtotal, currency)]]
@@ -160,6 +160,13 @@ def _totals_table(subtotal, gst_rate, gst_amount, total, total_label="Total", cu
     elif treatment == "igst": rows.append(["", f"IGST @ {Decimal(gst_rate):g}%", _fmt(igst, currency)])
     elif treatment == "export_lut": rows.append(["", "IGST @ 0.00% (Export under LUT)", _fmt(0, currency)])
     else: rows.append(["", f"GST @ {Decimal(gst_rate):g}%", _fmt(gst_amount, currency)])
+    if Decimal(oop_amount or 0) > 0:
+        label = "Out of Pocket Expenses (not subject to GST)"
+        if oop_description:
+            label += f" - {oop_description}"
+        rows.append(["", label, _fmt(oop_amount, currency)])
+    if Decimal(round_off or 0) != 0:
+        rows.append(["", "Round off", _fmt(round_off, currency)])
     rows.append(["", total_label, _fmt(total, currency)])
     table = Table(rows, colWidths=[CONTENT_WIDTH - 90 * mm, 50 * mm, 40 * mm])
     table.setStyle(TableStyle([
@@ -229,7 +236,9 @@ def build_invoice_pdf(invoice: models.Invoice) -> bytes:
     ]))
     place_of_supply = "-"
     if invoice.place_of_supply_name and invoice.place_of_supply_code:
-        place_of_supply = f"{invoice.place_of_supply_name} (State Code: {invoice.place_of_supply_code})"
+        place_of_supply = f"{invoice.place_of_supply_code} - {invoice.place_of_supply_name}"
+        if invoice.is_export:
+            place_of_supply += " (Export of services)"
     customer_tax_label, customer_tax_value = _customer_tax_detail(invoice)
     story = [
         header,
@@ -260,6 +269,8 @@ def build_invoice_pdf(invoice: models.Invoice) -> bytes:
         currency=invoice.document_currency if invoice.is_export else "INR",
         treatment=invoice.tax_treatment, cgst=invoice.cgst_amount,
         sgst=invoice.sgst_amount, igst=invoice.igst_amount,
+        oop_amount=getattr(invoice, "oop_amount", 0), oop_description=getattr(invoice, "oop_description", None),
+        round_off=getattr(invoice, "round_off", 0),
     ))
     closing.insert(0, Spacer(1, 5 * mm))
     qr = _upi_qr(invoice)

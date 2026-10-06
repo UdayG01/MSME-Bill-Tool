@@ -185,6 +185,23 @@ class InvoiceCreate(BaseModel):
     document_currency: str = Field(default="INR", min_length=3, max_length=3)
     exchange_rate_to_inr: Optional[Decimal] = Field(default=None, gt=0)
     reverse_charge: bool = False
+    oop_description: Optional[str] = Field(default=None, max_length=200)
+    oop_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    place_of_supply_code: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    pos_overridden: bool = False
+
+    @model_validator(mode="after")
+    def validate_oop_and_pos(self):
+        description = (self.oop_description or "").strip()
+        amount = Decimal(self.oop_amount or 0)
+        if amount > 0 and not description:
+            raise ValueError("Please enter a description for Out of Pocket Expenses")
+        if description and amount <= 0:
+            raise ValueError("Please enter the Out of Pocket Expenses amount or remove the line")
+        self.oop_description = description or None
+        if self.place_of_supply_code is not None:
+            self.place_of_supply_code = _validate_state_code(self.place_of_supply_code)
+        return self
 
 
 class InvoiceOut(BaseModel):
@@ -202,9 +219,16 @@ class InvoiceOut(BaseModel):
     subtotal: Decimal
     gst_amount: Decimal
     total: Decimal
+    oop_description: Optional[str]
+    oop_amount: Decimal
+    oop_amount_inr: Decimal
+    round_off: Decimal
+    round_off_inr: Decimal
     tax_treatment: str
     place_of_supply_code: str
     place_of_supply_name: str
+    pos_overridden: bool
+    pos_mismatch: bool
     cgst_amount: Decimal
     sgst_amount: Decimal
     igst_amount: Decimal
@@ -331,6 +355,14 @@ class TaxJurisdictionOut(TaxJurisdictionIn):
     id: str
 
 
+class GstStateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    code: str
+    name: str
+    is_active: bool
+    is_ut: bool
+
+
 class LutCertificateIn(BaseModel):
     arn: str = Field(min_length=1, max_length=100)
     financial_year: str = Field(min_length=4, max_length=9)
@@ -396,3 +428,25 @@ class ReceivableRow(BaseModel):
 class SalesBreakdownRow(BaseModel):
     key: str
     total: Decimal
+
+
+class SalesRegisterRow(BaseModel):
+    invoice_no: str
+    invoice_date: date
+    customer_name: str
+    taxable_value: Decimal
+    gst: Decimal
+    oop_amount: Decimal
+    invoice_total: Decimal
+    place_of_supply_code: str
+    place_of_supply_name: str
+
+
+class Gstr1InvoiceRow(BaseModel):
+    invoice_no: str
+    invoice_date: date
+    recipient_gstin: str
+    place_of_supply_code: str
+    taxable_value: Decimal
+    gst_amount: Decimal
+    invoice_value: Decimal

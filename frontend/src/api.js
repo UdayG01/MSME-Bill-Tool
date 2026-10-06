@@ -10,6 +10,18 @@ function errorDetail(detail) {
   return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 
+function friendlyRouteError(path, status, detail) {
+  if (path.startsWith("/reports/sales-register") && (status === 404 || status === 405)) {
+    return "Sales Register is not available yet. Please refresh after the latest server update is complete.";
+  }
+  if (path.startsWith("/tax-jurisdictions/gst-states") && (status === 404 || status === 405)) {
+    return "Place of Supply options are not available yet. Please refresh after the latest server update is complete.";
+  }
+  if (status === 404) return "The requested information is not available. Please refresh and try again.";
+  if (status === 405) return "This action is not available right now. Please refresh and try again.";
+  return errorDetail(detail);
+}
+
 async function request(path, options = {}) {
   let res;
   try {
@@ -25,7 +37,7 @@ async function request(path, options = {}) {
     let detail = `Request failed (HTTP ${res.status}${res.statusText ? `: ${res.statusText}` : ""})`;
     try {
       const body = await res.json();
-      detail = errorDetail(body.detail || body);
+      detail = friendlyRouteError(path, res.status, body.detail || body);
     } catch (_) {}
     throw new Error(detail);
   }
@@ -107,6 +119,7 @@ export const api = {
   restoreCustomer: (id) => request(`/customers/${id}/restore`, { method: "POST" }),
 
   listProducts: (includeArchived = true) => request(`/products?include_archived=${includeArchived}`),
+  listGstStates: () => request("/tax-jurisdictions/gst-states"),
   createProduct: (data) => request("/products", { method: "POST", body: JSON.stringify(data) }),
   updateProduct: (id, data) => request(`/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   archiveProduct: (id) => request(`/products/${id}/archive`, { method: "POST" }),
@@ -132,4 +145,6 @@ export const api = {
   setNumberingSetup: (data) => request("/invoices/numbering-setup", { method: "PUT", body: JSON.stringify(data) }),
   salesByArea: () => request("/reports/sales/area-wise"),
   salesByProduct: () => request("/reports/sales/product-wise"),
+  salesRegister: (fromDate, toDate) => request(`/reports/sales-register?${new URLSearchParams({ ...(fromDate ? { from_date: fromDate } : {}), ...(toDate ? { to_date: toDate } : {}) })}`),
+  gstr1: (fromDate, toDate) => request(`/reports/gstr1?${new URLSearchParams({ ...(fromDate ? { from_date: fromDate } : {}), ...(toDate ? { to_date: toDate } : {}) })}`),
 };

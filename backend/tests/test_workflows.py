@@ -404,3 +404,40 @@ def test_twenty_item_invoice_generates_multiple_pdf_pages(client):
     invoice = assert_status(client.post(f"/invoices/{draft['id']}/issue"), 200).json()
     pdf = assert_status(client.get(f"/invoices/{invoice['id']}/pdf"), 200)
     assert pdf_page_count(pdf.content) >= 2
+
+
+def test_oop_is_non_taxable_rounded_and_reported(client):
+    signup(client)
+    customer = assert_status(client.post("/customers", json=customer_payload()), 201).json()
+    payload = {
+        **invoice_payload(customer["id"], rate=1000),
+        "oop_description": "Travel and courier",
+        "oop_amount": 250.40,
+        "place_of_supply_code": "29",
+    }
+    invoice = assert_status(client.post("/invoices", json=payload), 201).json()
+    # GST remains 180, while 250.40 is added after tax and rounded to 1,430.
+    assert float(invoice["subtotal"]) == 1000
+    assert float(invoice["gst_amount"]) == 180
+    assert float(invoice["oop_amount"]) == 250.40
+    assert float(invoice["round_off"]) == -0.40
+    assert float(invoice["total"]) == 1430
+    issued = assert_status(client.post(f"/invoices/{invoice['id']}/issue"), 200).json()
+    register = assert_status(client.get("/reports/sales-register"), 200).json()
+    assert register == [{
+        "invoice_no": issued["invoice_no"], "invoice_date": str(date.today()),
+        "customer_name": "Northwind", "taxable_value": 1000, "gst": 180,
+        "oop_amount": 250.4, "invoice_total": 1430,
+        "place_of_supply_code": "29", "place_of_supply_name": "Karnataka",
+    }]
+
+
+def test_oop_requires_paired_description_and_amount(client):
+    signup(client)
+    customer = assert_status(client.post("/customers", json=customer_payload()), 201).json()
+    missing_description = client.post("/invoices", json={**invoice_payload(customer["id"]), "oop_amount": 1})
+    assert missing_description.status_code == 422
+    assert "description for Out of Pocket Expenses" in missing_description.text
+    missing_amount = client.post("/invoices", json={**invoice_payload(customer["id"]), "oop_description": "Travel"})
+    assert missing_amount.status_code == 422
+    assert "Out of Pocket Expenses amount" in missing_amount.text

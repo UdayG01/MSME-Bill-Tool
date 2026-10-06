@@ -9,6 +9,14 @@ from services.financial import money
 GST_STATES = {"01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura", "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand", "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat", "26": "Dadra and Nagar Haveli and Daman and Diu", "27": "Maharashtra", "29": "Karnataka", "30": "Goa", "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman and Nicobar Islands", "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh", "97": "Other Territory"}
 
 
+def determine_tax_type(supplier_state_code: str, recipient_state_code: str,
+                       place_of_supply_code: str, is_export: bool) -> str:
+    """POS is intentionally accepted but not used until the next release."""
+    if is_export:
+        return "export_lut"
+    return "cgst_sgst" if supplier_state_code == recipient_state_code else "igst"
+
+
 def _jurisdiction_name(db: Session, tenant_id: str, code: str) -> str:
     if not code:
         return ""
@@ -18,17 +26,18 @@ def _jurisdiction_name(db: Session, tenant_id: str, code: str) -> str:
     return jurisdiction.name if jurisdiction else GST_STATES.get(code, "")
 
 
-def calculate_invoice_tax(db: Session, tenant_id: str, tenant: models.Tenant, customer: models.Customer, subtotal: Decimal, gst_rate: Decimal):
+def calculate_invoice_tax(db: Session, tenant_id: str, tenant: models.Tenant, customer: models.Customer, subtotal: Decimal, gst_rate: Decimal, place_of_supply_code: str):
     """Return the tax snapshot. Rates remain an explicit invoice input; the
     jurisdiction catalogue is tenant-owned data used for display/validation."""
     if customer.is_foreign:
-        return {"rate": Decimal("0"), "gst": Decimal("0"), "cgst": Decimal("0"), "sgst": Decimal("0"), "igst": Decimal("0"), "treatment": "export_lut", "place_code": "", "place_name": ""}
+        return {"rate": Decimal("0"), "gst": Decimal("0"), "cgst": Decimal("0"), "sgst": Decimal("0"), "igst": Decimal("0"), "treatment": "export_lut"}
     supplier_code = (tenant.gstin or "")[:2]
     customer_code = (customer.gstin or "")[:2] or customer.state_code
     if supplier_code not in GST_STATES or customer_code not in GST_STATES:
         raise ServiceError(400, "Valid supplier GSTIN and customer state code are required for GST calculation")
     tax = money(subtotal * Decimal(gst_rate) / Decimal("100"))
-    if supplier_code == customer_code:
+    treatment = determine_tax_type(supplier_code, customer_code, place_of_supply_code, False)
+    if treatment == "cgst_sgst":
         cgst = money(tax / 2)
-        return {"rate": Decimal(gst_rate), "gst": money(cgst * 2), "cgst": cgst, "sgst": cgst, "igst": Decimal("0"), "treatment": "cgst_sgst", "place_code": customer_code, "place_name": _jurisdiction_name(db, tenant_id, customer_code)}
-    return {"rate": Decimal(gst_rate), "gst": tax, "cgst": Decimal("0"), "sgst": Decimal("0"), "igst": tax, "treatment": "igst", "place_code": customer_code, "place_name": _jurisdiction_name(db, tenant_id, customer_code)}
+        return {"rate": Decimal(gst_rate), "gst": money(cgst * 2), "cgst": cgst, "sgst": cgst, "igst": Decimal("0"), "treatment": treatment}
+    return {"rate": Decimal(gst_rate), "gst": tax, "cgst": Decimal("0"), "sgst": Decimal("0"), "igst": tax, "treatment": treatment}

@@ -31,6 +31,11 @@ COMPANY_SNAPSHOT_FIELDS = {
 CUSTOMER_SNAPSHOT_FIELDS = ("name", "address", "gstin", "country", "area")
 
 
+def _pos_name(db, code: str) -> str:
+    row = db.get(models.GstStateMaster, code)
+    return row.name if row else tax_service.GST_STATES.get(code, "Foreign Country" if code == "96" else "")
+
+
 def get_invoice(db: Session, tenant_id: str, invoice_id: str) -> models.Invoice:
     invoice = db.query(models.Invoice).filter_by(id=invoice_id, tenant_id=tenant_id).first()
     if not invoice:
@@ -104,10 +109,28 @@ def _apply_draft(db: Session, invoice: models.Invoice, payload: schemas.InvoiceC
             raise ServiceError(400, "Export currency must be one of USD, EUR, GBP, AED, or SGD")
     elif currency != settings.base_currency:
         raise ServiceError(400, "Domestic invoices must use the configured base currency")
-    document_subtotal = sum((Decimal(item.qty) * Decimal(item.rate) for item in payload.items), Decimal("0"))
+    document_subtotal = money(sum((Decimal(item.qty) * Decimal(item.rate) for item in payload.items), Decimal("0")))
     subtotal_inr = document_subtotal if not customer.is_foreign else document_subtotal * Decimal(payload.exchange_rate_to_inr)
-    tax = tax_service.calculate_invoice_tax(db, invoice.tenant_id, tenant, customer, subtotal_inr, payload.gst_rate)
-    effective_rate, subtotal, gst_amount, total = tax["rate"], subtotal_inr, tax["gst"], subtotal_inr + tax["gst"]
+    default_pos = "96" if customer.is_foreign else ((customer.gstin or "")[:2] or customer.state_code)
+    pos_code = payload.place_of_supply_code or default_pos
+    if not pos_code:
+        raise ServiceError(400, "Place of Supply is required")
+    pos = db.get(models.GstStateMaster, pos_code)
+    # The fallback keeps first-run/test databases usable before the catalogue
+    # migration has seeded rows; deployed databases always use the master.
+    if (pos and not pos.is_active) or (not pos and pos_code not in {*tax_service.GST_STATES, "96"}):
+        raise ServiceError(400, "Place of Supply must be an active GST state or UT")
+    if customer.is_foreign and pos_code != "96":
+        raise ServiceError(400, "Export invoices require Place of Supply 96 - Foreign Country")
+    tax = tax_service.calculate_invoice_tax(db, invoice.tenant_id, tenant, customer, subtotal_inr, payload.gst_rate, pos_code)
+    oop = money(payload.oop_amount)
+    oop_inr = oop if not customer.is_foreign else money(oop * Decimal(payload.exchange_rate_to_inr))
+    pre_round_document = document_subtotal + (Decimal("0") if customer.is_foreign else tax["gst"]) + oop
+    document_total = money(pre_round_document.quantize(Decimal("1")))
+    round_off = money(document_total - pre_round_document)
+    total = document_total if not customer.is_foreign else money(document_total * Decimal(payload.exchange_rate_to_inr))
+    round_off_inr = round_off if not customer.is_foreign else money(round_off * Decimal(payload.exchange_rate_to_inr))
+    effective_rate, subtotal, gst_amount = tax["rate"], money(subtotal_inr), tax["gst"]
     invoice.customer_id = customer.id
     invoice.invoice_date = payload.invoice_date
     invoice.order_no = payload.order_no
@@ -116,14 +139,22 @@ def _apply_draft(db: Session, invoice: models.Invoice, payload: schemas.InvoiceC
     invoice.subtotal = subtotal
     invoice.gst_amount = gst_amount
     invoice.total = total
+    invoice.oop_description = payload.oop_description
+    invoice.oop_amount = oop
+    invoice.oop_amount_inr = oop_inr
+    invoice.round_off = round_off
+    invoice.round_off_inr = round_off_inr
     invoice.is_export = customer.is_foreign
     invoice.document_currency = currency
     invoice.exchange_rate_to_inr = payload.exchange_rate_to_inr if customer.is_foreign else None
     invoice.document_subtotal = document_subtotal if customer.is_foreign else subtotal
-    invoice.document_total = document_subtotal if customer.is_foreign else total
+    invoice.document_total = document_total if customer.is_foreign else total
     invoice.tax_treatment = tax["treatment"]
-    invoice.place_of_supply_code = tax["place_code"]
-    invoice.place_of_supply_name = tax["place_name"]
+    invoice.place_of_supply_code = pos_code
+    invoice.place_of_supply_name = _pos_name(db, pos_code)
+    invoice.pos_overridden = bool(payload.pos_overridden)
+    recipient_code = (customer.gstin or "")[:2] or customer.state_code
+    invoice.pos_mismatch = not customer.is_foreign and pos_code != recipient_code
     invoice.cgst_amount = tax["cgst"]
     invoice.sgst_amount = tax["sgst"]
     invoice.igst_amount = tax["igst"]

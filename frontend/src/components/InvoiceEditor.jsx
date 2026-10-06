@@ -34,6 +34,10 @@ export default function InvoiceEditor({
   const [referenceRateError, setReferenceRateError] = useState("");
   const [reverse, setReverse] = useState(false);
   const [items, setItems] = useState([blank()]);
+  const [states, setStates] = useState([]);
+  const [posCode, setPosCode] = useState("");
+  const [posOverridden, setPosOverridden] = useState(false);
+  const [oop, setOop] = useState(null);
   const [productPickerId, setProductPickerId] = useState(null);
   const [productSearch, setProductSearch] = useState("");
   const [message, setMessage] = useState({});
@@ -48,8 +52,16 @@ export default function InvoiceEditor({
       setRate(invoice.exchange_rate_to_inr || "");
       setReverse(invoice.reverse_charge);
       setItems(invoice.items.map((i) => ({ ...i, id: i.id || uid() })));
+      setPosCode(invoice.place_of_supply_code || "");
+      setPosOverridden(Boolean(invoice.pos_overridden));
+      setOop(Number(invoice.oop_amount) > 0 ? { description: invoice.oop_description || "", amount: invoice.oop_amount } : null);
+    } else {
+      setCustomerId(""); setDate(todayISO()); setOrderNumber(""); setOrderDate("");
+      setGst(18); setCurrency("USD"); setRate(""); setReverse(false); setItems([blank()]);
+      setPosCode(""); setPosOverridden(false); setOop(null);
     }
   }, [invoice]);
+  useEffect(() => { api.listGstStates().then(setStates).catch((e) => setMessage({ error: e.message })); }, []);
   const customer = customers.find((c) => c.id === customerId);
   const customerOptions = customers.filter((c) => !c.is_archived || c.id === customerId);
   const isExport = customer?.is_foreign;
@@ -57,6 +69,10 @@ export default function InvoiceEditor({
   const frozenExport = Boolean(invoice?.is_export);
   const expectedRate = RATE_RANGES[currency];
   const unusualRate = expectedRate && Number(rate) > 0 && (Number(rate) < expectedRate[0] || Number(rate) > expectedRate[1]);
+  const defaultPos = isExport ? "96" : (customer?.gstin?.slice(0, 2) || customer?.state_code || "");
+  useEffect(() => {
+    if (!posOverridden) setPosCode(defaultPos);
+  }, [defaultPos, posOverridden]);
   useEffect(() => {
     if (!isExport || frozenExport) {
       setReferenceRate(null);
@@ -79,6 +95,7 @@ export default function InvoiceEditor({
   }, [isExport, frozenExport, currency]);
   const update = (id, key, value) =>
     setItems(items.map((i) => (i.id === id ? { ...i, [key]: value } : i)));
+  const removeItem = (id) => setItems(items.filter((i) => i.id !== id));
   const applyProduct = (itemId, productId) => {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
@@ -108,6 +125,13 @@ export default function InvoiceEditor({
     (s, i) => s + Number(i.qty || 0) * Number(i.rate || 0),
     0,
   );
+  const gstAmount = isExport ? 0 : subtotal * Number(gst || 0) / 100;
+  const oopAmount = Number(oop?.amount || 0);
+  const preRoundTotal = subtotal + gstAmount + oopAmount;
+  const roundedTotal = Math.round(preRoundTotal);
+  const roundOff = roundedTotal - preRoundTotal;
+  const recipientState = customer?.gstin?.slice(0, 2) || customer?.state_code || "";
+  const posMismatch = !isExport && posCode && recipientState && posCode !== recipientState;
   const save = async (issue) => {
     try {
       const payload = {
@@ -119,6 +143,10 @@ export default function InvoiceEditor({
         reverse_charge: reverse,
         document_currency: isExport ? currency : "INR",
         exchange_rate_to_inr: isExport ? Number(rate) : null,
+        place_of_supply_code: posCode || null,
+        pos_overridden: posOverridden,
+        oop_description: oop?.description || null,
+        oop_amount: oopAmount,
         items: items.map((i) => ({
           ...i,
           description: i.item_description || i.item_name,
@@ -161,6 +189,28 @@ export default function InvoiceEditor({
                 ))}
               </select>
             </Field>
+            <Field label="Place of Supply">
+              <input
+                className={inputCls}
+                list="gst-state-options"
+                placeholder="Search by code or state name"
+                value={posCode ? `${posCode} - ${states.find((s) => s.code === posCode)?.name || ""}` : ""}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const state = states.find((s) => `${s.code} - ${s.name}` === value || s.code === value);
+                  setPosCode(state?.code || value.slice(0, 2));
+                  setPosOverridden(true);
+                }}
+              />
+              <datalist id="gst-state-options">
+                {states.filter((s) => s.is_active && (s.code !== "96" || isExport)).map((s) => <option key={s.code} value={`${s.code} - ${s.name}`} />)}
+              </datalist>
+            </Field>
+            {posMismatch && (
+              <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Place of Supply ({posCode} - {states.find((s) => s.code === posCode)?.name || ""}) differs from the recipient's state ({recipientState}). Tax is currently being calculated as per the recipient's state. Please verify before issuing this invoice.
+              </div>
+            )}
             <Field label="Invoice date">
               <input
                 type="date"
@@ -266,7 +316,7 @@ export default function InvoiceEditor({
           <div className="min-w-0">
             {items.map((i) => (
               <div className="card mb-3 p-4 shadow-sm" key={i.id}>
-                <div className="grid grid-cols-[40px_minmax(120px,1fr)_minmax(150px,1.2fr)_90px_70px_90px] gap-3 items-start">
+                <div className="grid grid-cols-[40px_minmax(120px,1fr)_minmax(150px,1.2fr)_90px_70px_90px_40px] gap-3 items-start">
                   <div className="pt-[22px]">
                     <button
                       type="button"
@@ -333,6 +383,18 @@ export default function InvoiceEditor({
                       onChange={(e) => update(i.id, "rate", e.target.value)}
                     />
                   </Field>
+                  <div className="pt-[22px]">
+                    <button
+                      type="button"
+                      disabled={items.length === 1}
+                      className="h-10 w-10 rounded border border-red-200 text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="Remove line item"
+                      aria-label="Remove line item"
+                      onClick={() => removeItem(i.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
                 {productPickerId === i.id && (
                   <div className="mt-3 ml-[52px] w-full max-w-xl border-t pt-3">
@@ -434,8 +496,27 @@ export default function InvoiceEditor({
             >
               Add line
             </button>
-            <div className="mt-4">
-              Subtotal: {isExport ? currency : "INR"} {formatMoney(subtotal)}
+            {!oop ? (
+              <button className="btn btn-outline ml-3 px-3 py-2 text-sm" type="button" onClick={() => setOop({ description: "", amount: "" })}>
+                + Add Out of Pocket Expenses
+              </button>
+            ) : (
+              <div className="mt-4 grid grid-cols-[minmax(0,1fr)_140px_40px] gap-3 rounded border border-slate-200 p-3">
+                <Field label="Out of Pocket Expenses description">
+                  <input maxLength={200} className={inputCls} placeholder="e.g. Travel and courier charges for audit visit" value={oop.description} onChange={(e) => setOop({ ...oop, description: e.target.value })} />
+                </Field>
+                <Field label="Amount">
+                  <input type="number" min="0" step="0.01" className={inputCls} value={oop.amount} onChange={(e) => setOop({ ...oop, amount: e.target.value })} />
+                </Field>
+                <button type="button" className="mt-[22px] h-10 w-10 rounded border border-red-200 text-red-700" title="Remove Out of Pocket Expenses" aria-label="Remove Out of Pocket Expenses" onClick={() => setOop(null)}>×</button>
+              </div>
+            )}
+            <div className="mt-4 space-y-1 text-right">
+              <div>Taxable Value: {isExport ? currency : "INR"} {formatMoney(subtotal)}</div>
+              <div>GST: {isExport ? currency : "INR"} {formatMoney(gstAmount)}</div>
+              {oop && <div>Out of Pocket Expenses: {isExport ? currency : "INR"} {formatMoney(oopAmount)}</div>}
+              {roundOff !== 0 && <div>Round off: {isExport ? currency : "INR"} {formatMoney(roundOff)}</div>}
+              <div className="font-bold">Invoice Total: {isExport ? currency : "INR"} {formatMoney(roundedTotal)}</div>
             </div>
             <button
               className="btn btn-outline px-4 py-2 text-sm mt-4"
