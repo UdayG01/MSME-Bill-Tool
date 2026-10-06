@@ -161,9 +161,22 @@ def _totals_table(subtotal, gst_rate, gst_amount, total, total_label="Invoice To
     elif treatment == "export_lut": rows.append(["", "IGST @ 0.00% (Export under LUT)", _fmt(0, currency)])
     else: rows.append(["", f"GST @ {Decimal(gst_rate):g}%", _fmt(gst_amount, currency)])
     if Decimal(oop_amount or 0) > 0:
-        label = "Out of Pocket Expenses (not subject to GST)"
+        # A Paragraph is essential here: ReportLab does not wrap plain strings
+        # in table cells, which previously allowed long descriptions to collide
+        # with the amount column.
+        oop_style = ParagraphStyle(
+            name="OopTotalLabel",
+            parent=getSampleStyleSheet()["Normal"],
+            fontSize=8,
+            leading=10,
+        )
+        detail = "Not subject to GST"
         if oop_description:
-            label += f" - {oop_description}"
+            detail += f"<br/>{escape(str(oop_description))}"
+        label = Paragraph(
+            f"<b>Out of Pocket Expenses</b><br/><font size=7 color=\"#555555\">{detail}</font>",
+            oop_style,
+        )
         rows.append(["", label, _fmt(oop_amount, currency)])
     if Decimal(round_off or 0) != 0:
         rows.append(["", "Round off", _fmt(round_off, currency)])
